@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-  <meta name="theme-color" content="#170e17" />
+  <meta name="theme-color" content="#192528" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="A DOS" />
@@ -15,41 +15,36 @@
   <title>A DOS · Sin filtros</title>
 </head>
 <body>
-  <div class="noise" aria-hidden="true"></div>
-  <div class="ambient ambient-a" aria-hidden="true"></div>
-  <div class="ambient ambient-b" aria-hidden="true"></div>
   <main class="app">
     <header class="topbar">
       <a href="/" class="brand" id="brand" aria-label="Inicio de A DOS">
-        <span class="brand-icon" aria-hidden="true">♥</span>
+        <span class="brand-icon" aria-hidden="true">A<span>2</span></span>
         <span class="brand-type">A DOS <small>SIN FILTROS</small></span>
       </a>
-      <span class="top-pill"><span class="pink-dot"></span> SOLO PARA DOS · 18+</span>
+      <span class="top-pill">2 JUGADORES <span>18+</span></span>
     </header>
 
     <section id="landing" class="landing">
       <div class="intro">
-        <div class="eyebrow"><span class="line"></span> EL JUEGO QUE CAMBIA LA NOCHE</div>
-        <h1>Hay preguntas<br/>que <em>encienden</em><br/>todo.</h1>
-        <p>Verdades que nunca os habéis contado. Retos que se quedan entre vosotros. Dos personas, una sala privada y cero aburrimiento.</p>
-        <div class="feature-grid">
-          <div class="feature"><span class="feature-icon">✧</span><strong>278 cartas</strong><small>Sin repeticiones hasta agotar cada baraja</small></div>
-          <div class="feature"><span class="feature-icon">♡</span><strong>Solo vosotros</strong><small>Una sala privada con código</small></div>
-          <div class="feature"><span class="feature-icon">↗</span><strong>En directo</strong><small>Jugad desde dos móviles</small></div>
+        <div class="cover-copy">
+          <div class="eyebrow">Vuestra noche</div>
+          <h1>Verdad<br />o <em>reto.</em></h1>
+          <p>Elegid una carta. Luego le toca al otro.</p>
         </div>
-        <div class="mini-quote"><span class="mini-stars">✦ ✦ ✦</span> Una partida puede empezar inocente. Lo que venga después lo decidís vosotros.</div>
+        <div class="cover-deck" aria-hidden="true">
+          <div class="cover-card cover-card-back"><span>01</span><b>?</b><span>VERDAD</span></div>
+          <div class="cover-card cover-card-front"><span>02</span><b>♦</b><span>RETO</span></div>
+        </div>
       </div>
       <div class="join-panel">
-        <div class="panel-decoration" aria-hidden="true"><span>♥</span></div>
-        <div class="panel-top"><span class="pill">INVITACIÓN PRIVADA</span><span class="panel-number">01 / 02</span></div>
-        <h2>Vuestra noche<br/><em>empieza aquí.</em></h2>
-        <p class="panel-description">Cread una sala o entrad con el código que os han enviado.</p>
+        <h2>Jugar</h2>
+        <p class="panel-description">Crea una sala o entra con una invitación.</p>
         <div class="tabs" role="tablist" aria-label="Modo de entrada">
           <button id="tabCreate" class="tab active" type="button" role="tab" aria-selected="true">Crear sala</button>
           <button id="tabJoin" class="tab" type="button" role="tab" aria-selected="false">Unirme</button>
         </div>
         <form id="entryForm">
-          <label for="nickname" class="field-label">CÓMO QUIERES LLAMARTE</label>
+          <label for="nickname" class="field-label">TU NOMBRE</label>
           <input id="nickname" type="text" maxlength="22" autocomplete="nickname" placeholder="Tu nombre o apodo" required />
           <div id="joinCodeBlock" hidden>
             <label for="joinCode" class="field-label">CÓDIGO DE VUESTRA SALA</label>
@@ -59,7 +54,7 @@
             <p class="field-hint">Si te han enviado un enlace de invitación, la clave ya viene incluida. Se necesita para leer y enviar chat privado, audios, fotos y vídeos cifrados.</p>
           </div>
           <div id="createOptions">
-            <label class="field-label">¿CUÁNTO OS ATREVÉIS?</label>
+            <label class="field-label">ELEGID LA BARAJA</label>
             <div class="levels" id="initialLevels" role="radiogroup" aria-label="Intensidad">
               <label><input type="radio" name="level" value="chispa" /><span><b>CHISPA</b><small>Para empezar</small></span></label>
               <label><input type="radio" name="level" value="fuego" checked /><span><b>FUEGO</b><small>Sube el tono</small></span></label>
@@ -70,8 +65,11 @@
           </div>
           <div class="panel-divider"></div>
           <label class="check-line"><input id="confirmAdult" type="checkbox" required /><span>Confirmo que tengo 18 años o más y que jugaré con consentimiento mutuo.</span></label>
+          <details id="entryPermissions" class="entry-permissions">
+            <summary>Permisos opcionales de cámara</summary>
           <label class="check-line"><input id="mediaConsentEntry" type="checkbox" /><span>Acepto que puedan proponerse retos con cámara. <small>Los archivos se mantienen cifrados temporalmente en la memoria del servidor, para que tu pareja pueda descargarlos.</small></span></label>
           <label class="check-line"><input id="todoConsentEntry" type="checkbox" /><span>Acepto participar en «TODO VALE»: solo retos de fotos y vídeos +18, que pueden proponer desnudez voluntaria. <small>Esto no obliga a compartir nada. Puedo retirar el permiso cuando quiera.</small></span></label>
+          </details>
           <button id="submitEntry" class="primary-btn" type="submit">Crear nuestra sala <span>↗</span></button>
         </form>
         <p class="safety-note">Ningún reto es obligatorio. Podéis pasar sin explicaciones.</p>
@@ -83,8 +81,8 @@
       <div id="roomLobby" class="room-page" aria-label="Sala">
       <div class="room-head">
         <div>
-          <div class="eyebrow">VUESTRO RINCÓN PRIVADO</div>
-          <h1>Solo <em>nosotros.</em></h1>
+          <div class="eyebrow">A DOS / PARTIDA</div>
+          <h1>Vuestra sala</h1>
         </div>
         <button id="leaveRoom" class="text-btn" type="button" title="Salir de la sala">Salir <span>×</span></button>
       </div>
@@ -94,7 +92,7 @@
       </div>
       <div id="players" class="players"></div>
       <details class="custom-panel" id="customPanel">
-        <summary><span>✦ <b>Vuestras propias cartas</b><small>¿Tenéis ideas todavía más atrevidas? Añadidlas aquí.</small></span><span id="customCount">0 añadidas</span></summary>
+        <summary><span>✦ <b>Cartas propias</b><small>Añade una pregunta o un reto.</small></span><span id="customCount">0 añadidas</span></summary>
         <div class="custom-editor">
           <p>Solo se comparten en vuestra sala y no se guardan permanentemente. En TODO VALE podéis elegir que salgan únicamente las cartas que escribáis vosotros. El archivo de foto o vídeo es opcional.</p>
           <label for="customKind" class="field-label">TIPO DE CARTA</label>
@@ -106,8 +104,8 @@
       </details>
       <div id="waitingPanel" class="waiting-panel">
         <div class="section-tag">ANTES DE EMPEZAR</div>
-        <h2>Preparad <em>el ambiente.</em></h2>
-        <p id="waitingMessage">Esperando a vuestra segunda mitad… Comparte el código para invitarla.</p>
+        <h2>Listos para jugar</h2>
+        <p id="waitingMessage">Comparte la invitación para que entre la otra persona.</p>
         <div class="room-cta">
           <button id="readyBtn" class="secondary-btn" type="button">Estoy listo/a ✓</button>
           <button id="startBtn" class="primary-btn" type="button">Empezar partida <span>↗</span></button>
@@ -144,9 +142,9 @@
       <div id="gamePanel" class="game-panel" hidden>
         <div class="scoreline"><span id="roundLabel">RONDA 01</span><span id="modeLabel">FUEGO</span><span id="cameraBadge">SIN CÁMARA</span></div>
         <div class="game-stage">
-          <div class="turn-ornament" aria-hidden="true">✦</div>
+
           <div class="turn-overline" id="turnOverline">ES TU TURNO</div>
-          <div class="turn-avatar" aria-hidden="true">♥</div>
+
           <h2 id="turnTitle">¿Verdad o reto?</h2>
           <p id="turnDescription">Elige cómo quieres jugar esta ronda.</p>
 
@@ -180,7 +178,7 @@
                 <small>El archivo puede caducar. No se puede impedir que otra persona haga una captura.</small>
               </div>
             </div>
-            <div id="timerBox" class="timer-box"><span>⏳</span><strong id="timerValue">01:00</strong><button type="button" id="timerStart">Iniciar temporizador</button></div>
+            <div id="timerBox" class="timer-box"><span aria-hidden="true">◷</span><strong id="timerValue">01:00</strong><button type="button" id="timerStart">Iniciar temporizador</button></div>
             <div class="card-actions"><button id="skipCard" class="ghost-btn" type="button">Pasar sin problema</button><button id="doneCard" class="primary-btn" type="button">Reto cumplido ✓</button></div>
           </div>
         </div>
@@ -188,8 +186,8 @@
       </div>
       <section id="chatPanel" class="room-page chat-panel" hidden aria-label="Chat privado de la pareja">
         <div class="chat-header">
-          <div><span class="section-tag">VUESTRO CHAT PRIVADO</span><h2>Entre <em>nosotros.</em></h2></div>
-          <span class="chat-privacy-tag">🔒 Cifrado</span>
+          <div><span class="section-tag">A DOS / MENSAJES</span><h2>Chat</h2></div>
+          <span class="chat-privacy-tag">Cifrado</span>
         </div>
         <p id="chatKeyNotice" class="chat-key-warning" hidden>Para usar el chat y los audios necesitas entrar desde el <strong>enlace privado completo</strong>, no solo con el código. Pídeselo a tu pareja.</p>
         <div id="chatMessages" class="chat-messages" aria-label="Mensajes" aria-live="polite"><p class="chat-empty">Aún no hay mensajes.</p></div>
@@ -198,7 +196,7 @@
           <button id="chatSend" type="submit" class="secondary-btn">Enviar ↗</button>
         </form>
         <div class="voice-controls">
-          <button id="recordVoice" type="button" class="outline-btn">🎙 Grabar audio</button>
+          <button id="recordVoice" type="button" class="outline-btn">Grabar audio</button>
           <label id="voiceFileLabel" for="voiceFile" class="outline-btn voice-file-label">Elegir audio ↗</label>
           <input type="file" id="voiceFile" accept="audio/*" hidden />
         </div>
@@ -207,7 +205,7 @@
           <div class="voice-actions"><button id="sendVoice" type="button" class="secondary-btn">Enviar audio ♡</button><button id="discardVoice" type="button" class="text-btn">Descartar ×</button></div>
         </div>
         <p id="voiceStatus" class="chat-hint" aria-live="polite">Notas de voz de hasta 2 minutos. Pulsad grabar y luego detener.</p>
-        <p class="chat-hint">Textos cifrados de extremo a extremo. Los audios y vídeos solo se guardan temporalmente cifrados en memoria. Las salas se borran si el servidor se reinicia.</p>
+        <details class="chat-details"><summary>Privacidad y archivos</summary><p class="chat-hint">Los mensajes se cifran de extremo a extremo. Los archivos caducan y las salas se borran si el servidor se reinicia.</p></details>
       </section>
       </div>
       <nav class="room-nav" aria-label="Secciones de la partida">
@@ -225,7 +223,7 @@
         </button>
       </nav>
     </section>
-    <footer class="footer"><span>HECHO PARA DOS, NO PARA TODO EL MUNDO.</span><span>PRIVACIDAD · RESPETO · CONSENTIMIENTO · 18+</span></footer>
+    <footer class="footer"><span>A DOS · SIN FILTROS</span><span>PRIVACIDAD · RESPETO · CONSENTIMIENTO · 18+</span></footer>
   </main>
   <div id="viewerModal" class="viewer-modal" role="dialog" aria-modal="true" aria-label="Archivo privado recibido" hidden>
     <div class="viewer-card">

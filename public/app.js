@@ -362,10 +362,10 @@ function renderPlayers() {
   const placeholders = [...all];
   while (placeholders.length < 2) placeholders.push(null);
   $('players').innerHTML = placeholders.map((p,i) => {
-    if (!p) return '<div class="player"><div class="player-avatar">＋</div><div><div class="player-name">Esperando…</div><div class="player-sub">Comparte el código</div></div></div>';
+    if (!p) return '<div class="player"><div class="player-avatar">+</div><div><div class="player-name">Esperando…</div><div class="player-sub">Comparte el código</div></div></div>';
     const sub = p.id === me ? 'TÚ' : (i===0 ? 'ANFITRIÓN / A' : 'INVITADO / A');
     const label = current.game.started ? `${p.points} puntos` : (p.ready ? '✓ Listo/a' : (p.online ? 'Sin preparar' : 'Sin conexión'));
-    return `<div class="player"><div class="player-avatar">${safe(p.name.slice(0,1).toUpperCase())}</div><div style="min-width:0"><div class="player-name">${safe(p.name)}</div><div class="player-sub">${safe(sub)}</div></div><div class="player-state ${p.online?'':'offline'}">${safe(label)}</div></div>`;
+    return `<div class="player"><div class="player-avatar">${safe(p.name.slice(0,1).toUpperCase())}</div><div class="player-identity"><div class="player-name">${safe(p.name)}</div><div class="player-sub">${safe(sub)}</div></div><div class="player-state ${p.online?'':'offline'}">${safe(label)}</div></div>`;
   }).join('');
 }
 function renderWaiting() {
@@ -429,14 +429,15 @@ function renderGame() {
   $('pickDare').querySelector('small').textContent = todo ? 'PRUEBA DE' : 'ATRÉVETE';
   $('pickDare').querySelector('strong').textContent = todo ? 'Vídeo' : 'Reto';
   $('pickDare').querySelector('.choice-icon').textContent = todo ? '▶' : '♢';
-  $('pickRandom').textContent = todo ? '✧ Reto sorpresa: foto o vídeo ✧' : '✧ Que decida la suerte ✧';
-  $('turnOverline').textContent = mine ? 'AHORA TE TOCA' : `TURNO DE ${turn?.name.toUpperCase() || 'TU PAREJA'}`;
-  $('turnTitle').textContent = game.stage === 'choose' ? (todo ? '¿Foto o vídeo?' : '¿Verdad o reto?') : (game.card.kind === 'truth' ? 'La verdad primero.' : 'Atrévete a hacerlo.');
+  $('pickRandom').textContent = todo ? 'Elegir foto o vídeo al azar' : 'Sacar una carta al azar';
+  $('turnOverline').textContent = mine ? 'TU TURNO' : `TURNO DE ${turn?.name.toUpperCase() || 'TU PAREJA'}`;
+  $('turnTitle').textContent = game.stage === 'choose' ? (todo ? '¿Foto o vídeo?' : '¿Verdad o reto?') : (game.card.kind === 'truth' ? 'Carta de verdad' : 'Carta de reto');
   $('turnDescription').textContent = game.stage === 'choose' ? (mine ? (todo && !current.settings.todoValeActive ? 'Modo pausado. Ambos debéis aceptar TODO VALE y la cámara.' : 'Elige cómo quieres jugar esta ronda.') : `Esperando a que ${turn?.name || 'tu pareja'} elija una carta…`) : (mine ? 'Tu decisión. Puedes hacerlo o pasar, sin dar explicaciones.' : `${turn?.name || 'Tu pareja'} tiene la palabra. Dale su tiempo.`);
   $('chooseButtons').hidden = game.stage !== 'choose';
   $('activeCard').hidden = game.stage !== 'prompt';
   for (const id of ['pickTruth','pickDare','pickRandom']) $(id).disabled = !mine || (todo && !current.settings.todoValeActive);
   if (game.stage === 'prompt' && game.card) {
+    $('activeCard').dataset.kind = game.card.kind;
     $('cardTag').textContent = game.card.media ? (game.card.media === 'foto' ? 'RETO DE FOTO' : 'RETO DE VÍDEO') : game.card.kind === 'truth' ? 'VERDAD' : 'RETO';
     $('cardIndex').textContent = `RONDA Nº ${game.round}`;
     $('cardText').textContent = game.card.text;
@@ -477,7 +478,7 @@ async function copyText(value) {
       if (!document.execCommand('copy')) throw new Error('No disponible');
       input.remove();
     }
-    notify('¡Copiado! Ya puedes enviárselo.');
+    notify('Copiado. Ya puedes compartirlo.');
   } catch { window.prompt('Copia este texto para compartirlo:',value); }
 }
 function inviteUrl() { return `${window.location.origin}/?s=${encodeURIComponent(session.room)}${session.secret ? `#k=${session.secret}` : ''}`; }
@@ -524,6 +525,7 @@ function renderChat() {
       const text=document.createElement('p');text.textContent='Descifrando…';item.append(text);
       decryptChatText(m,text);
     } else if (m.kind === 'voice' && m.file) {
+      item.classList.add('voice-bubble');
       addVoicePlayer(bubble, m.file);
     }else if(m.file){
       const title=document.createElement('p');
@@ -654,7 +656,7 @@ function cancelRecording() {
   clearTimeout(voiceTimer);
   if(voiceRecording){try{voiceRecording.recorder.onstop=null;voiceRecording.recorder.stop();}catch{}
     voiceRecording.stream.getTracks().forEach(t=>t.stop());voiceRecording=null;}
-  if($('recordVoice'))$('recordVoice').textContent='🎙 Grabar audio';
+  if($('recordVoice'))$('recordVoice').textContent='Grabar audio';
 }
 async function toggleVoiceRecording() {
   if (voiceRecording) {
@@ -682,7 +684,7 @@ async function toggleVoiceRecording() {
     recorder.onstop=()=>{
       clearTimeout(voiceTimer);stream.getTracks().forEach(t=>t.stop());
       const started=voiceRecording?.started||Date.now();
-      voiceRecording=null;$('recordVoice').textContent='🎙 Grabar audio';
+      voiceRecording=null;$('recordVoice').textContent='Grabar audio';
       const mime=(recorder.mimeType||supported||'audio/webm').split(';')[0];
       const blob=new Blob(chunks,{type:mime});
       if(blob.size===0||blob.size>maxVoiceBytes){return notify('El audio está vacío o es demasiado grande (15 MB).');}
@@ -753,7 +755,7 @@ $('entryForm').addEventListener('submit', async e => {
   if (joining) params.code = $('joinCode').value.trim().toUpperCase();
   else {params.level = document.querySelector('[name="level"]:checked').value;params.cameraEnabled = $('enableCamera').checked || params.level === 'todo';}
   busy = true;$('submitEntry').disabled = true;
-  try { const data = await request(endpoint,params);openRoom(data);notify('¡Ya estáis más cerca de empezar!'); }
+  try { const data = await request(endpoint,params);openRoom(data); }
   catch(err) {notify(err.message);}
   finally {busy = false;$('submitEntry').disabled = false;}
 });
@@ -780,6 +782,7 @@ $('myTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.chec
 $('gameTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.checked));
 $('initialLevels').addEventListener('change',()=>{
   const todo = document.querySelector('[name="level"]:checked').value === 'todo';
+  if (todo) $('entryPermissions').open = true;
   if (todo) $('enableCamera').checked = true;
   $('enableCamera').disabled = todo;
 });
