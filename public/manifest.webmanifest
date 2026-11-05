@@ -3,8 +3,8 @@
   "short_name": "A DOS",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#192528",
-  "theme_color": "#192528",
+  "background_color": "#171b1a",
+  "theme_color": "#171b1a",
   "description": "Verdad o reto picante para dos con salas privadas",
   "icons": [
     {"src":"/icon-192.png","sizes":"192x192","type":"image/png"},
