@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#170e17" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -79,6 +79,8 @@
     </section>
 
     <section id="roomScreen" class="room-screen" hidden>
+      <div id="roomPages" class="room-pages">
+      <div id="roomLobby" class="room-page" aria-label="Sala">
       <div class="room-head">
         <div>
           <div class="eyebrow">VUESTRO RINCÓN PRIVADO</div>
@@ -106,6 +108,10 @@
         <div class="section-tag">ANTES DE EMPEZAR</div>
         <h2>Preparad <em>el ambiente.</em></h2>
         <p id="waitingMessage">Esperando a vuestra segunda mitad… Comparte el código para invitarla.</p>
+        <div class="room-cta">
+          <button id="readyBtn" class="secondary-btn" type="button">Estoy listo/a ✓</button>
+          <button id="startBtn" class="primary-btn" type="button">Empezar partida <span>↗</span></button>
+        </div>
         <div class="settings-card">
           <div class="setting-header"><strong>Reglas de la partida</strong><small>El anfitrión puede cambiarlas</small></div>
           <div class="level-buttons" id="roomLevels">
@@ -119,12 +125,22 @@
           <label class="check-line spaced"><input type="checkbox" id="myTodoConsent" /><span>Acepto jugar TODO VALE: retos +18 de fotos y vídeos con posible desnudez opcional.</span></label>
           <div id="todoStatus" class="camera-status"></div>
         </div>
-        <div class="room-cta">
-          <button id="readyBtn" class="secondary-btn" type="button">Estoy listo/a ✓</button>
-          <button id="startBtn" class="primary-btn" type="button">Empezar partida <span>↗</span></button>
-        </div>
       </div>
 
+      <div id="roomGameDetails" hidden>
+        <div class="under-stage">
+          <div><span class="section-tag">ÚLTIMAS RONDAS</span><div id="roundHistory" class="round-history"><span class="empty-history">Aún no hay rondas anteriores.</span></div></div>
+          <div class="game-aside"><span class="section-tag">VUESTRAS REGLAS</span><p>Podéis decir que no, cambiar cualquier reto y retirar vuestro consentimiento cuando queráis.</p><label class="check-line mini"><input id="gameMediaConsent" type="checkbox" /><span>Acepto retos con cámara</span></label><label class="check-line mini"><input id="gameTodoConsent" type="checkbox" /><span>Acepto TODO VALE +18 (desnudez opcional)</span></label><button type="button" class="text-btn small" id="restartBtn">Volver a empezar ↺</button></div>
+        </div>
+      </div>
+      </div>
+      <div id="roomChallenges" class="room-page" aria-label="Retos" hidden>
+        <div id="challengesWaiting" class="challenges-waiting">
+          <span aria-hidden="true">♢</span>
+          <h2>Todo listo para jugar</h2>
+          <p>Los retos aparecerán cuando empecéis la partida.</p>
+          <button class="outline-btn" type="button" data-room-page="roomLobby">Ir a la sala</button>
+        </div>
       <div id="gamePanel" class="game-panel" hidden>
         <div class="scoreline"><span id="roundLabel">RONDA 01</span><span id="modeLabel">FUEGO</span><span id="cameraBadge">SIN CÁMARA</span></div>
         <div class="game-stage">
@@ -156,7 +172,7 @@
             </div>
             <div id="mediaReceiver" class="media-panel" hidden>
               <div class="media-panel-head"><span>♡</span><strong>Contenido privado de tu pareja</strong></div>
-              <p id="mediaReceiverText">Los archivos recibidos estarán disponibles en el chat privado que verás más abajo.</p>
+              <p id="mediaReceiverText">Los archivos recibidos estarán disponibles en la pestaña Chat.</p>
               <div id="mediaIncoming" hidden>
                 <button id="openMedia" type="button" class="secondary-btn">Ver el archivo recibido ♡</button>
                 <div id="mediaRemotePreview" class="media-preview" hidden></div>
@@ -168,12 +184,9 @@
             <div class="card-actions"><button id="skipCard" class="ghost-btn" type="button">Pasar sin problema</button><button id="doneCard" class="primary-btn" type="button">Reto cumplido ✓</button></div>
           </div>
         </div>
-        <div class="under-stage">
-          <div><span class="section-tag">ÚLTIMAS RONDAS</span><div id="roundHistory" class="round-history"><span class="empty-history">Aún no hay rondas anteriores.</span></div></div>
-          <div class="game-aside"><span class="section-tag">VUESTRAS REGLAS</span><p>Podéis decir que no, cambiar cualquier reto y retirar vuestro consentimiento cuando queráis.</p><label class="check-line mini"><input id="gameMediaConsent" type="checkbox" /><span>Acepto retos con cámara</span></label><label class="check-line mini"><input id="gameTodoConsent" type="checkbox" /><span>Acepto TODO VALE +18 (desnudez opcional)</span></label><button type="button" class="text-btn small" id="restartBtn">Volver a empezar ↺</button></div>
-        </div>
       </div>
-      <section id="chatPanel" class="chat-panel" aria-label="Chat privado de la pareja">
+      </div>
+      <section id="chatPanel" class="room-page chat-panel" hidden aria-label="Chat privado de la pareja">
         <div class="chat-header">
           <div><span class="section-tag">VUESTRO CHAT PRIVADO</span><h2>Entre <em>nosotros.</em></h2></div>
           <span class="chat-privacy-tag">🔒 Cifrado</span>
@@ -196,6 +209,21 @@
         <p id="voiceStatus" class="chat-hint" aria-live="polite">Notas de voz de hasta 2 minutos. Pulsad grabar y luego detener.</p>
         <p class="chat-hint">Textos cifrados de extremo a extremo. Los audios y vídeos solo se guardan temporalmente cifrados en memoria. Las salas se borran si el servidor se reinicia.</p>
       </section>
+      </div>
+      <nav class="room-nav" aria-label="Secciones de la partida">
+        <button type="button" data-room-page="roomLobby" aria-controls="roomLobby" aria-current="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM9 21v-7h6v7"/></svg>
+          <span>Sala</span>
+        </button>
+        <button type="button" data-room-page="roomChallenges" aria-controls="roomChallenges">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 2.7 7.3L22 12l-7.3 2.7L12 22l-2.7-7.3L2 12l7.3-2.7z"/></svg>
+          <span>Retos</span>
+        </button>
+        <button type="button" data-room-page="chatPanel" aria-controls="chatPanel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l1.7-4A8.5 8.5 0 1 1 21 11.5Z"/><path d="M9 12h7"/></svg>
+          <span>Chat</span><span id="chatUnread" class="room-nav-unread" hidden>Nuevo</span>
+        </button>
+      </nav>
     </section>
     <footer class="footer"><span>HECHO PARA DOS, NO PARA TODO EL MUNDO.</span><span>PRIVACIDAD · RESPETO · CONSENTIMIENTO · 18+</span></footer>
   </main>

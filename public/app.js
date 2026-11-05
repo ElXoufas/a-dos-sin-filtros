@@ -263,11 +263,47 @@ async function request(endpoint, body, method='POST') {
   return data;
 }
 function persist() { if (session) sessionStorage.setItem(storageKey,JSON.stringify(session)); }
+const roomPages = ['roomLobby', 'roomChallenges', 'chatPanel'];
+let activeRoomPage = 'roomLobby';
+let gameWasStarted = false;
+let newestChatId = null;
+
+function showRoomPage(page) {
+  activeRoomPage = page;
+  for (const id of roomPages) $(id).hidden = id !== page;
+  for (const button of document.querySelectorAll('.room-nav button')) {
+    if (button.dataset.roomPage === page) button.setAttribute('aria-current', 'true');
+    else button.removeAttribute('aria-current');
+  }
+  if (page === 'chatPanel') {
+    $('chatUnread').hidden = true;
+    $('chatMessages').scrollTop = $('chatMessages').scrollHeight;
+  }
+}
+
+$('roomScreen').addEventListener('click', event => {
+  const button = event.target.closest('button[data-room-page]');
+  if (button) showRoomPage(button.dataset.roomPage);
+});
+
+function showRoom() {
+  $('landing').hidden = true;
+  $('roomScreen').hidden = false;
+  document.body.classList.add('in-room');
+  showRoomPage(current.game.started ? 'roomChallenges' : 'roomLobby');
+  window.scrollTo({top:0, behavior:'instant'});
+}
+
 function clearSession() {
   if (source) { source.close(); source = null; }
   clearMedia(); closeViewer(); cancelRecording(); voiceRecorded=null; lastChatSignature=''; chatDecrypted.clear(); mediaStageKey='';
   session = null; current = null; sessionStorage.removeItem(storageKey);
   $('landing').hidden = false; $('roomScreen').hidden = true;
+  document.body.classList.remove('in-room');
+  gameWasStarted = false; newestChatId = null;
+  $('chatUnread').hidden = true;
+  $('chatText').value = '';
+  discardVoice();
   window.history.replaceState({},'',window.location.pathname);
 }
 function openRoom(data) {
@@ -275,9 +311,9 @@ function openRoom(data) {
   pendingSecret = null;
   persist();
   current = data.state;
-  $('landing').hidden = true; $('roomScreen').hidden = false;
+  showRoom();
   window.history.replaceState({},'',`?s=${encodeURIComponent(data.room)}`);
-  render(); listen(); window.scrollTo({top:0,behavior:'smooth'});
+  render(); listen();
 }
 function listen() {
   if (!session) return;
@@ -415,7 +451,14 @@ function render() {
   $('roomCode').textContent = current.code;
   renderPlayers();
   $('customCount').textContent = `${current.settings.customCount || 0} añadidas`;
-  if (current.game.started) renderGame(); else renderWaiting();
+  const started = current.game.started;
+  $('challengesWaiting').hidden = started;
+  $('roomGameDetails').hidden = !started;
+  if (started) renderGame(); else renderWaiting();
+  if (started !== gameWasStarted && activeRoomPage !== 'chatPanel') {
+    showRoomPage(started ? 'roomChallenges' : 'roomLobby');
+  }
+  gameWasStarted = started;
   renderChat();
 }
 async function copyText(value) {
@@ -434,6 +477,12 @@ function renderChat() {
   const panel=$('chatPanel');
   if(!panel||!current||!session) return;
   const messages=current.messages||[];
+  const lastSeenIndex = messages.findIndex(message => message.id === newestChatId);
+  if (activeRoomPage !== 'chatPanel' &&
+      messages.slice(lastSeenIndex + 1).some(message => message.fromId !== current.me)) {
+    $('chatUnread').hidden = false;
+  }
+  newestChatId = messages.at(-1)?.id ?? null;
   const signature=messages.map(m=>`${m.id}:${m.file?.expires||''}`).join('|');
   $('chatKeyNotice').hidden=Boolean(session.secret);
   $('chatSend').disabled=!session.secret||current.players.length!==2;
@@ -463,7 +512,7 @@ function renderChat() {
     }
     list.append(item);
   }
-  if(atBottom)list.scrollTop=list.scrollHeight;
+  if(atBottom && activeRoomPage === 'chatPanel')list.scrollTop=list.scrollHeight;
 }
 async function decryptChatText(m,target) {
   try {
@@ -675,6 +724,6 @@ setInterval(renderTimer,500);
     const url = `/api/state?room=${encodeURIComponent(session.room)}&token=${encodeURIComponent(session.token)}`;
     const data = await request(url,null,'GET');
     current = data.state;
-    $('landing').hidden = true; $('roomScreen').hidden = false; render(); listen();
+    showRoom(); render(); listen();
   } catch { clearSession();if (code) {setEntryMode(true);$('joinCode').value = code.toUpperCase().slice(0,6);} }
 })();
