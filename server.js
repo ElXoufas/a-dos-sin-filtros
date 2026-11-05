@@ -203,9 +203,9 @@ function act(room, p, type, value) {
     if (room.game.stage !== 'choose') error('Termina antes la carta actual.');
     if (room.settings.level === 'todo') {
       if (!allowTodo(room)) error('TODO VALE necesita el consentimiento de ambos para fotos, vídeos y desnudez.', 403);
-      let media = String(value);
-      if (media === 'random') media = crypto.randomInt(2) ? 'foto' : 'video';
-      if (!['foto','video'].includes(media)) error('En TODO VALE solo existen retos de foto o vídeo.');
+      if (!['random', 'foto', 'video'].includes(value)) error('Solicitud de reto no válida.');
+      // Older clients can still submit a media type, but the server always draws it.
+      const media = crypto.randomInt(5) < 4 ? 'video' : 'foto';
       const options = room.customCards.filter(c => c.kind === 'dare' && c.media === media);
       const custom = room.settings.onlyCustomTodo || (options.length && crypto.randomInt(100) < 35);
       if (room.settings.onlyCustomTodo && !options.length) error('Añadid al menos un reto privado de ese tipo.');
