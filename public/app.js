@@ -6,13 +6,14 @@ let current = null;
 let source = null;
 let busy = false;
 let toastHandle = null;
-const modeNames = { chispa:'CHISPA', fuego:'FUEGO', intenso:'INTENSO' };
+const modeNames = { chispa:'CHISPA', fuego:'FUEGO', intenso:'SIN TIMIDEZ +18', todo:'TODO VALE · +18' };
 const storageKey = 'ados.sala.v1';
 const safe = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 // La clave se genera en el móvil y viaja en el fragmento #k= del enlace:
 // los fragmentos no se envían al servidor. El servidor retransmite únicamente
-// texto cifrado mediante AES-GCM y no guarda archivos ni claves.
+// contenido cifrado con AES-GCM; retiene fragmentos cifrados temporalmente
+// en memoria y nunca recibe ni almacena la clave privada.
 let pendingSecret = null;
 let selectedMedia = null;
 let selectedMediaUrl = null;
@@ -21,7 +22,20 @@ let incomingMedia = null;
 let mediaCleanupTimer = null;
 let mediaStageKey = '';
 let sendingMedia = false;
-const maxMediaBytes = 12 * 1024 * 1024;
+const MiB = 1024 * 1024;
+const maxPhotoBytes = 15 * MiB;
+const maxVideoBytes = 150 * MiB;
+const maxVoiceBytes = 15 * MiB;
+const chatDecrypted = new Map();
+let lastChatSignature = '';
+let selectedDuration = null;
+let voiceRecording = null;
+let voiceRecorded = null;
+let voiceTimer = null;
+let viewerUrl = null;
+let viewing = false;
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 function makeSecret() {
   const bytes = new Uint8Array(32); crypto.getRandomValues(bytes);
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -54,7 +68,7 @@ function clearMedia() {
   if (selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
   if (visibleMediaUrl) URL.revokeObjectURL(visibleMediaUrl);
   selectedMediaUrl = null; visibleMediaUrl = null;
-  selectedMedia = null; incomingMedia = null;
+  selectedMedia = null; selectedDuration = null; incomingMedia = null;
   if ($('mediaFile')) $('mediaFile').value = '';
   for (const id of ['mediaLocalPreview','mediaRemotePreview']) {if ($(id)) {$(id).replaceChildren();$(id).hidden = true;}}
   if ($('mediaIncoming')) $('mediaIncoming').hidden = true;
@@ -63,8 +77,8 @@ function clearMedia() {
   if ($('mediaSendStatus')) $('mediaSendStatus').textContent='';
 }
 function mediaPreview(container, blob, mime) {
-  const node = document.createElement(mime.startsWith('video/') ? 'video':'img');
-  if (node.tagName === 'VIDEO') {node.controls = true;node.playsInline=true;node.preload='metadata';}
+  const node = document.createElement(mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'img');
+  if (node.tagName !== 'IMG') {node.controls = true;node.playsInline=true;node.preload='metadata';}
   else node.alt = 'Previsualización del archivo privado';
   const url = URL.createObjectURL(blob);
   node.src = url;
@@ -74,8 +88,8 @@ function mediaPreview(container, blob, mime) {
 }
 function actualMime(file) {
   if (file.type && file.type !== 'application/octet-stream') return file.type.toLowerCase();
-  const extension = file.name.split('.').pop().toLowerCase();
-  return ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime'})[extension] || '';
+  const extension = (file.name||'').split('.').pop().toLowerCase();
+  return ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',heic:'image/heic',heif:'image/heif',mp4:'video/mp4',webm:'video/webm',mov:'video/quicktime',mp3:'audio/mpeg',m4a:'audio/mp4',ogg:'audio/ogg',oga:'audio/ogg',wav:'audio/wav',aac:'audio/aac',amr:'audio/3gpp'})[extension] || '';
 }
 function renderMedia() {
   const game = current.game;
@@ -94,32 +108,118 @@ function renderMedia() {
     $('mediaReceiverText').textContent = 'Si tu pareja decide compartir algo, aparecerá aquí. Puedes abrirlo o ignorarlo.';
   }
 }
+function base64url(bytes) {return toBase64(bytes).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+function nonceFor(prefix,i) {
+  const iv = new Uint8Array(12);iv.set(prefix);
+  new DataView(iv.buffer).setUint32(8,i,false);
+  return iv;
+}
+function sleep(ms) {return new Promise(r=>setTimeout(r,ms));}
+function fileDuration(file,tag) {
+  return new Promise((resolve,reject)=>{
+    const el=document.createElement(tag);
+    const url=URL.createObjectURL(file);
+    const timeout=setTimeout(()=>finish(Error('No se pudo leer la duración. Prueba con MP4 o WebM.')),30000);
+    let finished=false;
+    function finish(err,duration) {
+      if (finished) return;
+      finished=true;clearTimeout(timeout);
+      el.removeAttribute('src');el.load();URL.revokeObjectURL(url);
+      if (err) reject(err);else resolve(duration);
+    }
+    el.preload='metadata';
+    el.onloadedmetadata=()=>{
+      const d=el.duration;
+      if (!Number.isFinite(d)||d<=0) finish(Error('Este archivo no indica su duración. Usa un MP4 compatible.'));
+      else finish(null,d);
+    };
+    el.onerror=()=>finish(Error('Tu navegador no puede analizar este formato. Prueba con un MP4.'));
+    el.src=url;
+  });
+}
+async function uploadEncrypted(file,kind,context,duration,onProgress) {
+  if (!session?.secret) throw Error('Para enviar archivos o audios necesitáis el enlace privado completo.');
+  const key=await aesKey();
+  const prefix=crypto.getRandomValues(new Uint8Array(8));
+  const mime=actualMime(file).split(';')[0];
+  const body={room:session.room,token:session.token,kind,context,size:file.size,
+    duration:kind==='foto'?null:duration,mime,nonce:base64url(prefix)};
+  let transferId=null;
+  try {
+    const start=await request('/api/upload/start',body);
+    transferId=start.id;
+    for(let i=0;i<start.chunks;i++) {
+      const plain=await file.slice(i*start.chunkSize,Math.min(file.size,(i+1)*start.chunkSize)).arrayBuffer();
+      const aad=encoder.encode(`${session.room}:${start.id}:${i}`);
+      const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv:nonceFor(prefix,i),additionalData:aad},key,plain);
+      let done=false;
+      for(let attempt=0;attempt<4&&!done;attempt++) {
+        try {
+          const r=await fetch('/api/upload/chunk',{method:'POST',headers:{
+            'Content-Type':'application/octet-stream',
+            'X-ADOS-Room':session.room,'X-ADOS-Token':session.token,
+            'X-ADOS-Upload':start.id,'X-ADOS-Index':String(i)
+          },body:encrypted});
+          if(!r.ok) {const x=await r.json().catch(()=>({}));throw Error(x.error||`Error de subida (${r.status})`);}
+          done=true;
+        }catch(e) {
+          if(attempt===3 || /consentimiento|ronda|demasiado grande|no tienes acceso|lleno|servidor tiene demasiado/i.test(e.message)) throw e;
+          await sleep(600*(attempt+1));
+        }
+      }
+      onProgress?.(Math.round((i+1)/start.chunks*100));
+    }
+    const complete=await request('/api/upload/finish',{room:session.room,token:session.token,id:start.id});
+    return complete;
+  }catch(e) {
+    if(transferId) request('/api/upload/cancel',{room:session.room,token:session.token,id:transferId}).catch(()=>{});
+    throw e;
+  }
+}
+async function downloadEncrypted(meta,onProgress) {
+  if (!session?.secret) throw Error('Necesitas el enlace completo con clave privada.');
+  const key=await aesKey();
+  const prefix=fromBase64(meta.nonce);
+  const parts=[];
+  for(let i=0;i<meta.chunks;i++) {
+    let response;
+    for(let attempt=0;attempt<4;attempt++) {
+      try {
+        response=await fetch(`/api/upload/chunk?id=${encodeURIComponent(meta.id)}&i=${i}`,{
+          headers:{'X-ADOS-Room':session.room,'X-ADOS-Token':session.token}
+        });
+        if(!response.ok) {const data=await response.json().catch(()=>({}));throw Error(data.error||'No se pudo descargar el archivo.');}
+        break;
+      }catch(e){if(attempt===3)throw e;await sleep(600*(attempt+1));}
+    }
+    const ciphertext=await response.arrayBuffer();
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonceFor(prefix,i),additionalData:encoder.encode(`${session.room}:${meta.id}:${i}`)},key,ciphertext);
+    parts.push(plain);
+    onProgress?.(Math.round((i+1)/meta.chunks*100));
+  }
+  return new Blob(parts,{type:meta.mime});
+}
 async function sendSelectedMedia() {
   if (!session || !selectedMedia || sendingMedia) return;
   if (!current?.settings?.cameraActive || current.game.turn !== current.me || !current.game.card?.media) return;
-  if (!window.confirm('¿Enviar este archivo SOLO a tu pareja? Aunque lo transmitamos cifrado, quien lo reciba podría hacer una captura o guardarlo.')) return;
-  sendingMedia = true;
-  $('sendMedia').disabled = true;
-  $('mediaSendStatus').textContent = 'Cifrando y enviando…';
+  if (!window.confirm('¿Compartir este archivo con tu pareja? Quien lo reciba puede guardarlo o hacer una captura.'))return;
+  sendingMedia=true;
+  $('sendMedia').disabled=true;
+  $('mediaSendStatus').textContent='Preparando envío… 0 %';
   try {
-    const key = await aesKey();
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,await selectedMedia.arrayBuffer()));
-    await request('/api/media',{room:session.room,token:session.token,item:{kind:current.game.card.media,mime:actualMime(selectedMedia),iv:toBase64(iv).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''),data:toBase64(encrypted)}});
-    $('sendMedia').textContent = 'Enviado a tu pareja ✓';
-    $('mediaSendStatus').textContent = 'Archivo entregado cifrado. Puedes seguir con la ronda.';
-    selectedMedia = null;
-    if (selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
+    const file=selectedMedia,kind=current.game.card.media,duration=selectedDuration;
+    await uploadEncrypted(file,kind,'round',duration,percent=>{
+      $('mediaSendStatus').textContent=`Enviando cifrado… ${percent} %`;
+    });
+    $('sendMedia').textContent='Enviado ✓';
+    $('mediaSendStatus').textContent='¡Entregado! Tu pareja puede abrirlo desde el chat privado durante 15 minutos.';
+    selectedMedia=null;selectedDuration=null;
+    if(selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
     selectedMediaUrl=null;
     $('mediaLocalPreview').replaceChildren();$('mediaLocalPreview').hidden=true;
     $('mediaFile').value='';
-  } catch(error) {
-    $('mediaSendStatus').textContent = error.message;
-    notify(error.message);
-  } finally {
-    sendingMedia=false;
-    $('sendMedia').disabled=!selectedMedia;
-  }
+  }catch(e){$('mediaSendStatus').textContent=e.message;notify(e.message);}
+  finally {sendingMedia=false;$('sendMedia').disabled=!selectedMedia;}
 }
 async function showIncomingMedia() {
   if (!incomingMedia) return;
@@ -165,7 +265,7 @@ async function request(endpoint, body, method='POST') {
 function persist() { if (session) sessionStorage.setItem(storageKey,JSON.stringify(session)); }
 function clearSession() {
   if (source) { source.close(); source = null; }
-  clearMedia(); mediaStageKey='';
+  clearMedia(); closeViewer(); cancelRecording(); voiceRecorded=null; lastChatSignature=''; chatDecrypted.clear(); mediaStageKey='';
   session = null; current = null; sessionStorage.removeItem(storageKey);
   $('landing').hidden = false; $('roomScreen').hidden = true;
   window.history.replaceState({},'',window.location.pathname);
@@ -239,12 +339,22 @@ function renderWaiting() {
   $('roomCameraSetting').checked = current.settings.cameraEnabled;
   $('roomCameraSetting').disabled = !isHost;
   $('myMediaConsent').checked = mine?.mediaConsent || false;
+  $('myTodoConsent').checked = mine?.todoConsent || false;
+  $('roomCameraSetting').disabled = !isHost || current.settings.level === 'todo';
+  $('roomOnlyCustomLabel').hidden = current.settings.level !== 'todo';
+  $('roomOnlyCustom').checked = Boolean(current.settings.onlyCustomTodo);
+  $('roomOnlyCustom').disabled = !isHost;
+  $('customMediaStatus').textContent = `${current.settings.customPhotoCount || 0} de foto · ${current.settings.customVideoCount || 0} de vídeo`;
+  $('todoStatus').textContent = current.settings.level === 'todo' ? (current.settings.todoValeActive ? '✓ TODO VALE activado por los dos.' : `TODO VALE: ${current.players.filter(p=>p.todoConsent).length}/2 aceptan el nivel +18. Ambos debéis aceptar también la cámara.`) : 'TODO VALE solo se activa cuando ambos lo aceptáis.';
+  const kindOptions = $('customKind').options;
+  for (const opt of kindOptions) opt.disabled = current.settings.level === 'todo' && ['truth','dare'].includes(opt.value);
+  if (current.settings.level === 'todo' && ['truth','dare'].includes($('customKind').value)) $('customKind').value = 'foto';
   const agreed = current.players.filter(p => p.mediaConsent).length;
   $('cameraStatus').textContent = current.settings.cameraEnabled ? (current.settings.cameraActive ? '♥ Activado: ambos lo habéis aceptado.' : `Consentimiento de cámara: ${agreed}/2 · Hasta que ambos aceptéis, no saldrán estos retos.`) : 'La cámara está desactivada en esta sala.';
   $('readyBtn').textContent = mine?.ready ? 'Preparado/a ✓ (desmarcar)' : 'Estoy listo/a ✓';
   $('readyBtn').disabled = !full;
   $('startBtn').hidden = !isHost;
-  $('startBtn').disabled = !everyoneReady;
+  $('startBtn').disabled = !everyoneReady || (current.settings.level === 'todo' && (!current.settings.todoValeActive || (current.settings.onlyCustomTodo && (!current.settings.customPhotoCount || !current.settings.customVideoCount))));
 }
 function formatTime(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
@@ -253,7 +363,9 @@ function formatTime(seconds) {
 function renderTimer() {
   if (!current?.game?.started || current.game.stage !== 'prompt') return;
   const end = current.game.timerEnd;
-  $('timerValue').textContent = formatTime(end ? (end - Date.now()) / 1000 : 60);
+  const seconds = current.game.card?.media === 'video' ? 300 : 60;
+  $('timerValue').textContent = formatTime(end ? (end - Date.now()) / 1000 : seconds);
+  $('timerStart').textContent = seconds === 300 ? 'Iniciar 5 min' : 'Iniciar 60 s';
   $('timerStart').hidden = !!end || current.game.turn !== current.me;
 }
 function renderGame() {
@@ -264,12 +376,22 @@ function renderGame() {
   $('roundLabel').textContent = `RONDA ${String(game.round).padStart(2,'0')}`;
   $('modeLabel').textContent = modeNames[current.settings.level];
   $('cameraBadge').textContent = current.settings.cameraActive ? '◉ CÁMARA ON' : 'CÁMARA OFF';
+  const todo = current.settings.level === 'todo';
+  $('gamePanel').classList.toggle('todo-mode', todo);
+  document.querySelector('.game-stage').classList.toggle('todo-mode', todo);
+  $('pickTruth').querySelector('small').textContent = todo ? 'PRUEBA DE' : 'CONFIESA';
+  $('pickTruth').querySelector('strong').textContent = todo ? 'Foto' : 'Verdad';
+  $('pickTruth').querySelector('.choice-icon').textContent = todo ? '▣' : '◉';
+  $('pickDare').querySelector('small').textContent = todo ? 'PRUEBA DE' : 'ATRÉVETE';
+  $('pickDare').querySelector('strong').textContent = todo ? 'Vídeo' : 'Reto';
+  $('pickDare').querySelector('.choice-icon').textContent = todo ? '▶' : '♢';
+  $('pickRandom').textContent = todo ? '✧ Reto sorpresa: foto o vídeo ✧' : '✧ Que decida la suerte ✧';
   $('turnOverline').textContent = mine ? 'AHORA TE TOCA' : `TURNO DE ${turn?.name.toUpperCase() || 'TU PAREJA'}`;
-  $('turnTitle').textContent = game.stage === 'choose' ? '¿Verdad o reto?' : (game.card.kind === 'truth' ? 'La verdad primero.' : 'Atrévete a hacerlo.');
-  $('turnDescription').textContent = game.stage === 'choose' ? (mine ? 'Elige cómo quieres jugar esta ronda.' : `Esperando a que ${turn?.name || 'tu pareja'} elija una carta…`) : (mine ? 'Tu decisión. Puedes hacerlo o pasar, sin dar explicaciones.' : `${turn?.name || 'Tu pareja'} tiene la palabra. Dale su tiempo.`);
+  $('turnTitle').textContent = game.stage === 'choose' ? (todo ? '¿Foto o vídeo?' : '¿Verdad o reto?') : (game.card.kind === 'truth' ? 'La verdad primero.' : 'Atrévete a hacerlo.');
+  $('turnDescription').textContent = game.stage === 'choose' ? (mine ? (todo && !current.settings.todoValeActive ? 'Modo pausado. Ambos debéis aceptar TODO VALE y la cámara.' : 'Elige cómo quieres jugar esta ronda.') : `Esperando a que ${turn?.name || 'tu pareja'} elija una carta…`) : (mine ? 'Tu decisión. Puedes hacerlo o pasar, sin dar explicaciones.' : `${turn?.name || 'Tu pareja'} tiene la palabra. Dale su tiempo.`);
   $('chooseButtons').hidden = game.stage !== 'choose';
   $('activeCard').hidden = game.stage !== 'prompt';
-  for (const id of ['pickTruth','pickDare','pickRandom']) $(id).disabled = !mine;
+  for (const id of ['pickTruth','pickDare','pickRandom']) $(id).disabled = !mine || (todo && !current.settings.todoValeActive);
   if (game.stage === 'prompt' && game.card) {
     $('cardTag').textContent = game.card.media ? (game.card.media === 'foto' ? 'RETO DE FOTO' : 'RETO DE VÍDEO') : game.card.kind === 'truth' ? 'VERDAD' : 'RETO';
     $('cardIndex').textContent = `RONDA Nº ${game.round}`;
@@ -282,6 +404,8 @@ function renderGame() {
   }
   renderMedia();
   $('gameMediaConsent').checked = current.players.find(p => p.id === current.me)?.mediaConsent || false;
+  $('gameTodoConsent').checked = current.players.find(p => p.id === current.me)?.todoConsent || false;
+  $('gameTodoConsent').parentElement.hidden = !todo;
   $('restartBtn').hidden = current.me !== current.host;
   const hist = game.history;
   $('roundHistory').innerHTML = hist.length ? hist.map(h => `<div class="history-row"><span>${safe(h.player)} · ${h.media ? safe(h.media) : (h.kind === 'truth'?'Verdad':'Reto')}</span><small>${h.outcome==='done'?'✓ Hecho':'↷ Pasó'}</small></div>`).join('') : '<span class="empty-history">Aún no hay rondas anteriores.</span>';
@@ -292,6 +416,7 @@ function render() {
   renderPlayers();
   $('customCount').textContent = `${current.settings.customCount || 0} añadidas`;
   if (current.game.started) renderGame(); else renderWaiting();
+  renderChat();
 }
 async function copyText(value) {
   try {
@@ -305,6 +430,150 @@ async function copyText(value) {
   } catch { window.prompt('Copia este texto para compartirlo:',value); }
 }
 function inviteUrl() { return `${window.location.origin}/?s=${encodeURIComponent(session.room)}${session.secret ? `#k=${session.secret}` : ''}`; }
+function renderChat() {
+  const panel=$('chatPanel');
+  if(!panel||!current||!session) return;
+  const messages=current.messages||[];
+  const signature=messages.map(m=>`${m.id}:${m.file?.expires||''}`).join('|');
+  $('chatKeyNotice').hidden=Boolean(session.secret);
+  $('chatSend').disabled=!session.secret||current.players.length!==2;
+  $('recordVoice').disabled=!session.secret||current.players.length!==2;
+  $('voiceFileLabel').hidden=!session.secret||current.players.length!==2;
+  if(signature===lastChatSignature)return;
+  lastChatSignature=signature;
+  const list=$('chatMessages');
+  const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
+  list.replaceChildren();
+  if(!messages.length){const empty=document.createElement('p');empty.className='chat-empty';empty.textContent='Aún no hay mensajes. Escribid algo o mandad un audio ♡';list.append(empty);}
+  for(const m of messages){
+    const mine=m.fromId===current.me;
+    const item=document.createElement('div');item.className='chat-bubble '+(mine?'mine':'theirs');
+    const header=document.createElement('small');header.textContent=`${mine?'Tú':m.fromName} · ${new Date(m.at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}`;
+    item.append(header);
+    if(m.kind==='text'){
+      const text=document.createElement('p');text.textContent=chatDecrypted.get(m.id)||'Descifrando…';item.append(text);
+      if(!chatDecrypted.has(m.id)) decryptChatText(m,text);
+    }else if(m.file){
+      const title=document.createElement('p');
+      title.textContent=m.kind==='voice'?'🎙 Mensaje de voz':m.file.kind==='video'?'🎥 Vídeo privado':'📷 Foto privada';
+      item.append(title);
+      if(mine){const msg=document.createElement('span');msg.className='chat-hint';msg.textContent='Enviado de forma cifrada';item.append(msg);}
+      else if(Date.now()>=m.file.expires){const msg=document.createElement('span');msg.className='chat-hint';msg.textContent='Archivo caducado';item.append(msg);}
+      else {const btn=document.createElement('button');btn.type='button';btn.className='chat-download';btn.textContent='Abrir archivo privado ↗';btn.addEventListener('click',()=>openAttachment(m.file));item.append(btn);}
+    }
+    list.append(item);
+  }
+  if(atBottom)list.scrollTop=list.scrollHeight;
+}
+async function decryptChatText(m,target) {
+  try {
+    const key=await aesKey();
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromBase64(m.iv)},key,fromBase64(m.data));
+    const txt=decoder.decode(plain);chatDecrypted.set(m.id,txt);
+    if(target.isConnected) target.textContent=txt;
+  }catch {if(target.isConnected)target.textContent='🔒 No se pudo descifrar. Usad el mismo enlace privado.';}
+}
+async function openAttachment(meta) {
+  if(viewing)return;
+  viewing=true;
+  $('viewerModal').hidden=false;
+  $('viewerStatus').textContent='Recibiendo archivo… 0 %';
+  $('viewerContent').replaceChildren();
+  try {
+    const blob=await downloadEncrypted(meta,p=>{$('viewerStatus').textContent=`Descargando y descifrando… ${p} %`;});
+    if(viewerUrl)URL.revokeObjectURL(viewerUrl);
+    viewerUrl=mediaPreview($('viewerContent'),blob,meta.mime);
+    $('viewerStatus').textContent='Archivo abierto solo en tu móvil. Ciérralo cuando termines.';
+  }catch(e){$('viewerStatus').textContent=e.message;notify(e.message);}
+  finally{viewing=false;}
+}
+function closeViewer() {
+  if(!$('viewerModal'))return;
+  $('viewerContent').replaceChildren();$('viewerModal').hidden=true;
+  if(viewerUrl)URL.revokeObjectURL(viewerUrl);
+  viewerUrl=null;
+}
+async function sendChatText(event) {
+  event.preventDefault();
+  const message=$('chatText').value.trim();
+  if(!message||!session||!session.secret)return;
+  if(message.length>1000)return notify('Máximo 1000 caracteres por mensaje.');
+  $('chatSend').disabled=true;
+  try {
+    const key=await aesKey();const iv=crypto.getRandomValues(new Uint8Array(12));
+    const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,encoder.encode(message)));
+    await request('/api/chat/text',{room:session.room,token:session.token,iv:base64url(iv),data:toBase64(encrypted)});
+    $('chatText').value='';
+  }catch(e){notify(e.message);}
+  finally{$('chatSend').disabled=false;}
+}
+function cancelRecording() {
+  clearTimeout(voiceTimer);
+  if(voiceRecording){try{voiceRecording.recorder.onstop=null;voiceRecording.recorder.stop();}catch{}
+    voiceRecording.stream.getTracks().forEach(t=>t.stop());voiceRecording=null;}
+  if($('recordVoice'))$('recordVoice').textContent='🎙 Grabar audio';
+}
+async function toggleVoiceRecording() {
+  if(voiceRecording){voiceRecording.recorder.stop();return;}
+  if(!session?.secret)return notify('Para enviar audios necesitas el enlace privado completo.');
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return notify('Tu navegador no permite grabar. Usa «Elegir audio».');
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const supported=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));
+    const recorder=new MediaRecorder(stream,supported?{mimeType:supported}:{});
+    const chunks=[];
+    recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+    recorder.onerror=()=>notify('Ha ocurrido un problema al grabar.');
+    recorder.onstop=()=>{
+      clearTimeout(voiceTimer);stream.getTracks().forEach(t=>t.stop());
+      const started=voiceRecording?.started||Date.now();
+      voiceRecording=null;$('recordVoice').textContent='🎙 Grabar audio';
+      const mime=(recorder.mimeType||supported||'audio/webm').split(';')[0];
+      const blob=new Blob(chunks,{type:mime});
+      if(blob.size===0||blob.size>maxVoiceBytes){return notify('El audio está vacío o es demasiado grande (15 MB).');}
+      showVoiceReady(blob,Math.min(120,(Date.now()-started)/1000));
+    };
+    recorder.start(1000);
+    voiceRecording={recorder,stream,started:Date.now()};
+    $('recordVoice').textContent='■ Detener audio';
+    $('voiceStatus').textContent='Grabando… pulsa Detener cuando termines (máx. 2 min).';
+    voiceTimer=setTimeout(()=>{if(voiceRecording?.recorder.state==='recording')voiceRecording.recorder.stop();},120000);
+  }catch(e){notify('No se pudo usar el micrófono. Revisa los permisos del navegador.');}
+}
+function showVoiceReady(blob,duration) {
+  voiceRecorded={file:blob,duration};
+  const audio=$('voicePreview');
+  if(audio.src.startsWith('blob:'))URL.revokeObjectURL(audio.src);
+  audio.src=URL.createObjectURL(blob);
+  $('voicePreviewBox').hidden=false;
+  $('voiceStatus').textContent=`Audio preparado: ${formatTime(duration)} · ${(blob.size/MiB).toFixed(1)} MB`;
+}
+async function chooseVoiceFile(e) {
+  const file=e.target.files?.[0];if(!file)return;
+  const mime=actualMime(file).split(';')[0];
+  if(!['audio/webm','audio/mp4','audio/ogg','audio/mpeg','audio/wav','audio/aac','audio/x-m4a','audio/3gpp'].includes(mime)||file.size>maxVoiceBytes||!file.size) return notify('Usa un audio compatible de hasta 15 MB.');
+  try{const duration=await fileDuration(file,'audio');if(duration>120.5)throw Error('El audio debe durar 2 minutos o menos.');showVoiceReady(file,duration);}
+  catch(err){notify(err.message);}
+}
+async function sendVoice() {
+  if(!voiceRecorded||!session)return;
+  if(!window.confirm('¿Enviar este mensaje de voz a tu pareja?'))return;
+  const {file,duration}=voiceRecorded;
+  $('sendVoice').disabled=true;
+  try {
+    await uploadEncrypted(file,'audio','chat',duration,p=>{$('voiceStatus').textContent=`Enviando audio cifrado… ${p} %`;});
+    discardVoice();$('voiceStatus').textContent='Mensaje de voz enviado ✓';
+  }catch(e){$('voiceStatus').textContent=e.message;notify(e.message);}
+  finally{$('sendVoice').disabled=false;}
+}
+function discardVoice(){voiceRecorded=null;$('voicePreviewBox').hidden=true;const audio=$('voicePreview');
+  if(audio.src.startsWith('blob:'))URL.revokeObjectURL(audio.src);audio.removeAttribute('src');$('voiceFile').value='';}
+$('chatForm').addEventListener('submit',sendChatText);
+$('recordVoice').addEventListener('click',toggleVoiceRecording);
+$('voiceFile').addEventListener('change',chooseVoiceFile);
+$('sendVoice').addEventListener('click',sendVoice);
+$('discardVoice').addEventListener('click',discardVoice);
+$('closeViewer').addEventListener('click',closeViewer);
 $('tabCreate').addEventListener('click', () => setEntryMode(false));
 $('tabJoin').addEventListener('click', () => setEntryMode(true));
 $('entryForm').addEventListener('submit', async e => {
@@ -315,11 +584,11 @@ $('entryForm').addEventListener('submit', async e => {
   if (!name) return notify('Introduce un nombre.');
   pendingSecret = joining ? ($('joinMediaKey').value.trim() || mediaSecretFromInvite()) : makeSecret();
   if (joining && !/^[A-Za-z0-9_-]{43}$/.test(pendingSecret || '')) pendingSecret = null;
-  const params = {name,adult:true,mediaConsent:$('mediaConsentEntry').checked && Boolean(pendingSecret)};
+  const params = {name,adult:true,mediaConsent:$('mediaConsentEntry').checked && Boolean(pendingSecret),todoConsent:$('todoConsentEntry').checked};
   if (joining && $('mediaConsentEntry').checked && !pendingSecret) notify('Has entrado sin clave privada: podrás jugar, pero no activar los retos con fotos o vídeos.');
   const endpoint = joining ? '/api/join' : '/api/create';
   if (joining) params.code = $('joinCode').value.trim().toUpperCase();
-  else {params.level = document.querySelector('[name="level"]:checked').value;params.cameraEnabled = $('enableCamera').checked;}
+  else {params.level = document.querySelector('[name="level"]:checked').value;params.cameraEnabled = $('enableCamera').checked || params.level === 'todo';}
   busy = true;$('submitEntry').disabled = true;
   try { const data = await request(endpoint,params);openRoom(data);notify('¡Ya estáis más cerca de empezar!'); }
   catch(err) {notify(err.message);}
@@ -343,31 +612,47 @@ $('readyBtn').addEventListener('click', () => send('ready',!current.players.find
 $('startBtn').addEventListener('click', () => send('start'));
 $('roomLevels').addEventListener('click',e => { const b=e.target.closest('[data-level]');if(b&&!b.disabled)send('settings',{level:b.dataset.level}); });
 $('roomCameraSetting').addEventListener('change',e=>send('settings',{cameraEnabled:e.target.checked}));
+$('roomOnlyCustom').addEventListener('change',e=>send('settings',{onlyCustomTodo:e.target.checked}));
+$('myTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.checked));
+$('gameTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.checked));
+$('initialLevels').addEventListener('change',()=>{
+  const todo = document.querySelector('[name="level"]:checked').value === 'todo';
+  if (todo) $('enableCamera').checked = true;
+  $('enableCamera').disabled = todo;
+});
 $('myMediaConsent').addEventListener('change',e=>{if(e.target.checked&&!session.secret){e.target.checked=false;return notify('Para fotos y vídeos necesitas el enlace privado completo.');}send('mediaConsent',e.target.checked);});
 $('gameMediaConsent').addEventListener('change',e=>{if(e.target.checked&&!session.secret){e.target.checked=false;return notify('Para fotos y vídeos necesitas el enlace privado completo.');}send('mediaConsent',e.target.checked);});
-$('pickTruth').addEventListener('click',()=>send('pick','truth'));
-$('pickDare').addEventListener('click',()=>send('pick','dare'));
+$('pickTruth').addEventListener('click',()=>send('pick',current?.settings?.level === 'todo' ? 'foto' : 'truth'));
+$('pickDare').addEventListener('click',()=>send('pick',current?.settings?.level === 'todo' ? 'video' : 'dare'));
 $('pickRandom').addEventListener('click',()=>send('pick','random'));
 $('timerStart').addEventListener('click',()=>send('timer'));
 $('doneCard').addEventListener('click',()=>send('finish'));
 $('skipCard').addEventListener('click',()=>send('skip'));
 $('restartBtn').addEventListener('click',()=> {if(window.confirm('¿Reiniciar la partida y los puntos para ambos?')) send('restart');});
-$('mediaFile').addEventListener('change',e => {
+$('mediaFile').addEventListener('change',async e => {
   const file=e.target.files?.[0];
   if (!file) return;
   const mime=actualMime(file);
   const kind=current?.game?.card?.media;
   const goodTypes=kind==='foto'?['image/jpeg','image/png','image/webp','image/heic','image/heif']:['video/mp4','video/webm','video/quicktime'];
-  if (!goodTypes.includes(mime) || file.size>maxMediaBytes || file.size===0) {
+  const max=kind==='foto'?maxPhotoBytes:maxVideoBytes;
+  if(!goodTypes.includes(mime) || file.size>max || file.size===0) {
     e.target.value='';selectedMedia=null;$('sendMedia').disabled=true;
-    return notify('Usa una imagen o vídeo compatible de hasta 12 MB.');
+    return notify(`Usa un archivo compatible de hasta ${max/MiB} MB.`);
   }
-  selectedMedia=file;
-  if (selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
-  selectedMediaUrl=mediaPreview($('mediaLocalPreview'),file,mime);
-  $('sendMedia').textContent='Enviar cifrado a mi pareja ♡';
-  $('mediaSendStatus').textContent='Revísalo antes de enviarlo. No se comparte automáticamente.';
-  $('sendMedia').disabled=false;
+  selectedMedia=null;selectedDuration=null;$('sendMedia').disabled=true;
+  $('mediaSendStatus').textContent=kind==='video'?'Comprobando duración (máximo 5 minutos)…':'Preparando imagen…';
+  try {
+    const duration=kind==='video'?await fileDuration(file,'video'):null;
+    if(kind==='video'&&duration>300) throw Error('Este vídeo dura más de 5 minutos. Recórtalo antes de enviarlo.');
+    if(current?.game?.card?.media!==kind) throw Error('La ronda ha cambiado. Vuelve a elegir tu archivo.');
+    selectedDuration=duration;selectedMedia=file;
+    if(selectedMediaUrl) URL.revokeObjectURL(selectedMediaUrl);
+    selectedMediaUrl=mediaPreview($('mediaLocalPreview'),file,mime);
+    $('sendMedia').textContent='Enviar cifrado a mi pareja ♡';
+    $('mediaSendStatus').textContent=`Preparado: ${(file.size/MiB).toFixed(1)} MB${duration?` · ${formatTime(duration)}`:''}. Confirma cuando quieras.`;
+    $('sendMedia').disabled=false;
+  }catch(err){e.target.value='';$('mediaSendStatus').textContent=err.message;notify(err.message);}
 });
 $('sendMedia').addEventListener('click',sendSelectedMedia);
 $('openMedia').addEventListener('click',showIncomingMedia);
