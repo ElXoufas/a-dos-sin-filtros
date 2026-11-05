@@ -33,7 +33,7 @@
         <h1>Hay preguntas<br/>que <em>encienden</em><br/>todo.</h1>
         <p>Verdades que nunca os habéis contado. Retos que se quedan entre vosotros. Dos personas, una sala privada y cero aburrimiento.</p>
         <div class="feature-grid">
-          <div class="feature"><span class="feature-icon">✧</span><strong>+160 cartas</strong><small>Sin repeticiones hasta agotar cada baraja</small></div>
+          <div class="feature"><span class="feature-icon">✧</span><strong>278 cartas</strong><small>Sin repeticiones hasta agotar cada baraja</small></div>
           <div class="feature"><span class="feature-icon">♡</span><strong>Solo vosotros</strong><small>Una sala privada con código</small></div>
           <div class="feature"><span class="feature-icon">↗</span><strong>En directo</strong><small>Jugad desde dos móviles</small></div>
         </div>
@@ -54,22 +54,24 @@
           <div id="joinCodeBlock" hidden>
             <label for="joinCode" class="field-label">CÓDIGO DE VUESTRA SALA</label>
             <input id="joinCode" type="text" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="EJ. A7K2PX" class="code-input" />
-            <label for="joinMediaKey" class="field-label">CLAVE PRIVADA PARA FOTOS Y VÍDEOS (OPCIONAL)</label>
+            <label for="joinMediaKey" class="field-label">CLAVE PRIVADA PARA CHAT, AUDIOS, FOTOS Y VÍDEOS (OPCIONAL)</label>
             <input id="joinMediaKey" type="text" maxlength="43" autocomplete="off" spellcheck="false" placeholder="Se rellena sola si usas el enlace" />
-            <p class="field-hint">Si te han enviado un enlace de invitación, la clave ya viene incluida. Solo hace falta para compartir archivos cifrados.</p>
+            <p class="field-hint">Si te han enviado un enlace de invitación, la clave ya viene incluida. Se necesita para leer y enviar chat privado, audios, fotos y vídeos cifrados.</p>
           </div>
           <div id="createOptions">
             <label class="field-label">¿CUÁNTO OS ATREVÉIS?</label>
             <div class="levels" id="initialLevels" role="radiogroup" aria-label="Intensidad">
               <label><input type="radio" name="level" value="chispa" /><span><b>CHISPA</b><small>Para empezar</small></span></label>
               <label><input type="radio" name="level" value="fuego" checked /><span><b>FUEGO</b><small>Sube el tono</small></span></label>
-              <label><input type="radio" name="level" value="intenso" /><span><b>INTENSO</b><small>Sin timidez</small></span></label>
+              <label><input type="radio" name="level" value="intenso" /><span><b>SIN TIMIDEZ</b><small>Solo adultos · +18</small></span></label>
+              <label><input type="radio" name="level" value="todo" /><span><b>TODO VALE</b><small>60 retos de cámara · +18</small></span></label>
             </div>
             <label class="check-line spaced"><input type="checkbox" id="enableCamera" /><span>Incluir retos opcionales de fotos y vídeos <small>Solo se activarán si ambos dais permiso y tenéis la clave privada</small></span></label>
           </div>
           <div class="panel-divider"></div>
           <label class="check-line"><input id="confirmAdult" type="checkbox" required /><span>Confirmo que tengo 18 años o más y que jugaré con consentimiento mutuo.</span></label>
-          <label class="check-line"><input id="mediaConsentEntry" type="checkbox" /><span>Acepto que puedan proponerse retos con cámara. <small>Si decides enviar un archivo, viajará cifrado a tu pareja, sin guardarse en el servidor.</small></span></label>
+          <label class="check-line"><input id="mediaConsentEntry" type="checkbox" /><span>Acepto que puedan proponerse retos con cámara. <small>Los archivos se mantienen cifrados temporalmente en la memoria del servidor, para que tu pareja pueda descargarlos.</small></span></label>
+          <label class="check-line"><input id="todoConsentEntry" type="checkbox" /><span>Acepto participar en «TODO VALE»: solo retos de fotos y vídeos +18, que pueden proponer desnudez voluntaria. <small>Esto no obliga a compartir nada. Puedo retirar el permiso cuando quiera.</small></span></label>
           <button id="submitEntry" class="primary-btn" type="submit">Crear nuestra sala <span>↗</span></button>
         </form>
         <p class="safety-note">Ningún reto es obligatorio. Podéis pasar sin explicaciones.</p>
@@ -92,10 +94,10 @@
       <details class="custom-panel" id="customPanel">
         <summary><span>✦ <b>Vuestras propias cartas</b><small>¿Tenéis ideas todavía más atrevidas? Añadidlas aquí.</small></span><span id="customCount">0 añadidas</span></summary>
         <div class="custom-editor">
-          <p>Solo se comparten en vuestra sala y se mezclan con las demás. Las cartas de cámara solo aparecen con permiso de ambos.</p>
+          <p>Solo se comparten en vuestra sala y no se guardan permanentemente. En TODO VALE podéis elegir que salgan únicamente las cartas que escribáis vosotros. El archivo de foto o vídeo es opcional.</p>
           <label for="customKind" class="field-label">TIPO DE CARTA</label>
           <select id="customKind" aria-label="Tipo de carta"><option value="truth">Verdad</option><option value="dare">Reto</option><option value="foto">Reto con foto</option><option value="video">Reto con vídeo</option></select>
-          <label for="customText" class="field-label">VUESTRA PREGUNTA O RETO</label>
+          <label for="customText" class="field-label">ESCRIBID VUESTRO RETO</label>
           <textarea id="customText" maxlength="220" rows="3" placeholder="Escribid aquí un reto que os apetezca probar…"></textarea>
           <button type="button" id="addCustomCard" class="outline-btn">+ Añadir a nuestra baraja</button>
         </div>
@@ -107,12 +109,15 @@
         <div class="settings-card">
           <div class="setting-header"><strong>Reglas de la partida</strong><small>El anfitrión puede cambiarlas</small></div>
           <div class="level-buttons" id="roomLevels">
-            <button type="button" data-level="chispa">CHISPA</button><button type="button" data-level="fuego">FUEGO</button><button type="button" data-level="intenso">INTENSO</button>
+            <button type="button" data-level="chispa">CHISPA</button><button type="button" data-level="fuego">FUEGO</button><button type="button" data-level="intenso">SIN TIMIDEZ</button><button type="button" data-level="todo">TODO VALE</button>
           </div>
           <label class="check-line" id="roomCameraSettingLabel"><input type="checkbox" id="roomCameraSetting" /><span>Incluir retos de foto / vídeo <small>Requiere consentimiento de ambos</small></span></label>
+          <label class="check-line spaced" id="roomOnlyCustomLabel" hidden><input type="checkbox" id="roomOnlyCustom" /><span><b>SOLO NUESTROS RETOS</b><small>En TODO VALE, usar exclusivamente las cartas privadas que añadáis vosotros. Necesitáis al menos una de foto y una de vídeo. Máximo 100 cartas por sala.</small><small id="customMediaStatus">0 de foto · 0 de vídeo</small></span></label>
           <div class="subtle-line"></div>
           <label class="check-line"><input type="checkbox" id="myMediaConsent" /><span>Yo acepto los retos opcionales con cámara.</span></label>
           <div id="cameraStatus" class="camera-status"></div>
+          <label class="check-line spaced"><input type="checkbox" id="myTodoConsent" /><span>Acepto jugar TODO VALE: retos +18 de fotos y vídeos con posible desnudez opcional.</span></label>
+          <div id="todoStatus" class="camera-status"></div>
         </div>
         <div class="room-cta">
           <button id="readyBtn" class="secondary-btn" type="button">Estoy listo/a ✓</button>
@@ -138,7 +143,7 @@
           <div id="activeCard" class="active-card" hidden>
             <div class="card-meta"><span id="cardTag">VERDAD</span><span id="cardIndex">EL MOMENTO ES AHORA</span></div>
             <div id="cardText" class="card-text"></div>
-            <div id="cameraNotice" class="camera-notice" hidden>♡ Este es un reto voluntario. Enviar es opcional. Si elegís compartir un archivo, se transmite cifrado y no se almacena en el servidor.</div>
+            <div id="cameraNotice" class="camera-notice" hidden>♡ Este es un reto voluntario. Enviar es opcional. Los archivos se cifran en tu móvil, permanecen temporalmente cifrados en la memoria del servidor y caducan automáticamente.</div>
             <div id="mediaSender" class="media-panel" hidden>
               <div class="media-panel-head"><span>◉</span><strong>¿Quieres compartir el momento?</strong></div>
               <p>Elige una foto o vídeo de tu móvil. Primero lo verás tú; solo llegará a tu pareja cuando confirmes el envío.</p>
@@ -147,30 +152,61 @@
               <div id="mediaLocalPreview" class="media-preview" hidden></div>
               <button id="sendMedia" type="button" class="secondary-btn media-send" disabled>Enviar cifrado a mi pareja ♡</button>
               <div id="mediaSendStatus" class="media-status" aria-live="polite"></div>
-              <small>Máximo 12 MB. Sin copias en el servidor. Quien lo reciba puede hacer capturas o guardar el archivo.</small>
+              <small>Vídeos: hasta 5 minutos y 150 MB. Fotos: hasta 15 MB. Los archivos cifrados caducan a los 15 min y se pierden si el servidor se reinicia. La otra persona puede guardarlos o hacer capturas.</small>
             </div>
             <div id="mediaReceiver" class="media-panel" hidden>
               <div class="media-panel-head"><span>♡</span><strong>Contenido privado de tu pareja</strong></div>
-              <p id="mediaReceiverText">Si tu pareja comparte algo, aparecerá aquí para que decidas si verlo.</p>
+              <p id="mediaReceiverText">Los archivos recibidos estarán disponibles en el chat privado que verás más abajo.</p>
               <div id="mediaIncoming" hidden>
                 <button id="openMedia" type="button" class="secondary-btn">Ver el archivo recibido ♡</button>
                 <div id="mediaRemotePreview" class="media-preview" hidden></div>
                 <button id="closeMedia" type="button" class="text-btn small" hidden>Cerrar y borrar la vista ×</button>
-                <small>Se elimina de esta pantalla a los 90 segundos. No se puede impedir que otra persona haga una captura.</small>
+                <small>El archivo puede caducar. No se puede impedir que otra persona haga una captura.</small>
               </div>
             </div>
-            <div id="timerBox" class="timer-box"><span>⏳</span><strong id="timerValue">01:00</strong><button type="button" id="timerStart">Iniciar 60 s</button></div>
+            <div id="timerBox" class="timer-box"><span>⏳</span><strong id="timerValue">01:00</strong><button type="button" id="timerStart">Iniciar temporizador</button></div>
             <div class="card-actions"><button id="skipCard" class="ghost-btn" type="button">Pasar sin problema</button><button id="doneCard" class="primary-btn" type="button">Reto cumplido ✓</button></div>
           </div>
         </div>
         <div class="under-stage">
           <div><span class="section-tag">ÚLTIMAS RONDAS</span><div id="roundHistory" class="round-history"><span class="empty-history">Aún no hay rondas anteriores.</span></div></div>
-          <div class="game-aside"><span class="section-tag">VUESTRAS REGLAS</span><p>Podéis decir que no, cambiar cualquier reto y retirar vuestro consentimiento cuando queráis.</p><label class="check-line mini"><input id="gameMediaConsent" type="checkbox" /><span>Acepto retos con cámara</span></label><button type="button" class="text-btn small" id="restartBtn">Volver a empezar ↺</button></div>
+          <div class="game-aside"><span class="section-tag">VUESTRAS REGLAS</span><p>Podéis decir que no, cambiar cualquier reto y retirar vuestro consentimiento cuando queráis.</p><label class="check-line mini"><input id="gameMediaConsent" type="checkbox" /><span>Acepto retos con cámara</span></label><label class="check-line mini"><input id="gameTodoConsent" type="checkbox" /><span>Acepto TODO VALE +18 (desnudez opcional)</span></label><button type="button" class="text-btn small" id="restartBtn">Volver a empezar ↺</button></div>
         </div>
       </div>
+      <section id="chatPanel" class="chat-panel" aria-label="Chat privado de la pareja">
+        <div class="chat-header">
+          <div><span class="section-tag">VUESTRO CHAT PRIVADO</span><h2>Entre <em>nosotros.</em></h2></div>
+          <span class="chat-privacy-tag">🔒 Cifrado</span>
+        </div>
+        <p id="chatKeyNotice" class="chat-key-warning" hidden>Para usar el chat y los audios necesitas entrar desde el <strong>enlace privado completo</strong>, no solo con el código. Pídeselo a tu pareja.</p>
+        <div id="chatMessages" class="chat-messages" aria-label="Mensajes" aria-live="polite"><p class="chat-empty">Aún no hay mensajes.</p></div>
+        <form id="chatForm" class="chat-form">
+          <input id="chatText" type="text" maxlength="1000" placeholder="Escríbele algo…" autocomplete="off" aria-label="Escribir mensaje" />
+          <button id="chatSend" type="submit" class="secondary-btn">Enviar ↗</button>
+        </form>
+        <div class="voice-controls">
+          <button id="recordVoice" type="button" class="outline-btn">🎙 Grabar audio</button>
+          <label id="voiceFileLabel" for="voiceFile" class="outline-btn voice-file-label">Elegir audio ↗</label>
+          <input type="file" id="voiceFile" accept="audio/*" hidden />
+        </div>
+        <div id="voicePreviewBox" class="voice-preview-box" hidden>
+          <audio id="voicePreview" controls preload="metadata"></audio>
+          <div class="voice-actions"><button id="sendVoice" type="button" class="secondary-btn">Enviar audio ♡</button><button id="discardVoice" type="button" class="text-btn">Descartar ×</button></div>
+        </div>
+        <p id="voiceStatus" class="chat-hint" aria-live="polite">Notas de voz de hasta 2 minutos. Pulsad grabar y luego detener.</p>
+        <p class="chat-hint">Textos cifrados de extremo a extremo. Los audios y vídeos solo se guardan temporalmente cifrados en memoria. Las salas se borran si el servidor se reinicia.</p>
+      </section>
     </section>
     <footer class="footer"><span>HECHO PARA DOS, NO PARA TODO EL MUNDO.</span><span>PRIVACIDAD · RESPETO · CONSENTIMIENTO · 18+</span></footer>
   </main>
+  <div id="viewerModal" class="viewer-modal" role="dialog" aria-modal="true" aria-label="Archivo privado recibido" hidden>
+    <div class="viewer-card">
+      <div class="viewer-top"><strong>♡ Archivo privado</strong><button id="closeViewer" class="outline-btn" type="button">Cerrar ×</button></div>
+      <div id="viewerContent" class="media-preview"></div>
+      <p id="viewerStatus" class="media-status" role="status">Abriendo…</p>
+      <small>No hay forma de impedir que alguien guarde o capture el archivo una vez abierto.</small>
+    </div>
+  </div>
   <div id="toast" role="status" class="toast" aria-live="polite" hidden></div>
   <script src="/app.js" defer></script>
 </body>
