@@ -26,7 +26,6 @@ const MiB = 1024 * 1024;
 const maxPhotoBytes = 15 * MiB;
 const maxVideoBytes = 150 * MiB;
 const maxVoiceBytes = 15 * MiB;
-const chatDecrypted = new Map();
 let lastChatSignature = '';
 let selectedDuration = null;
 let voiceRecording = null;
@@ -177,23 +176,25 @@ async function uploadEncrypted(file,kind,context,duration,onProgress) {
   }
 }
 async function downloadEncrypted(meta,onProgress) {
-  if (!session?.secret) throw Error('Necesitas el enlace completo con clave privada.');
+  const downloadSession = session;
+  if (!downloadSession?.secret) throw Error('Necesitas el enlace completo con clave privada.');
   const key=await aesKey();
   const prefix=fromBase64(meta.nonce);
   const parts=[];
   for(let i=0;i<meta.chunks;i++) {
     let response;
     for(let attempt=0;attempt<4;attempt++) {
+      if (session !== downloadSession) throw Error('La sala ha cambiado.');
       try {
         response=await fetch(`/api/upload/chunk?id=${encodeURIComponent(meta.id)}&i=${i}`,{
-          headers:{'X-ADOS-Room':session.room,'X-ADOS-Token':session.token}
+          headers:{'X-ADOS-Room':downloadSession.room,'X-ADOS-Token':downloadSession.token}
         });
         if(!response.ok) {const data=await response.json().catch(()=>({}));throw Error(data.error||'No se pudo descargar el archivo.');}
         break;
       }catch(e){if(attempt===3)throw e;await sleep(600*(attempt+1));}
     }
     const ciphertext=await response.arrayBuffer();
-    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonceFor(prefix,i),additionalData:encoder.encode(`${session.room}:${meta.id}:${i}`)},key,ciphertext);
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:nonceFor(prefix,i),additionalData:encoder.encode(`${downloadSession.room}:${meta.id}:${i}`)},key,ciphertext);
     parts.push(plain);
     onProgress?.(Math.round((i+1)/meta.chunks*100));
   }
@@ -267,6 +268,9 @@ const roomPages = ['roomLobby', 'roomChallenges', 'chatPanel'];
 let activeRoomPage = 'roomLobby';
 let gameWasStarted = false;
 let newestChatId = null;
+const chatBubbles = new Map();
+let microphonePending = false;
+let sendingVoice = false;
 
 function showRoomPage(page) {
   activeRoomPage = page;
@@ -274,6 +278,9 @@ function showRoomPage(page) {
   for (const button of document.querySelectorAll('.room-nav button')) {
     if (button.dataset.roomPage === page) button.setAttribute('aria-current', 'true');
     else button.removeAttribute('aria-current');
+  }
+  if (page !== 'chatPanel') {
+    for (const {audio} of chatBubbles.values()) audio?.pause();
   }
   if (page === 'chatPanel') {
     $('chatUnread').hidden = true;
@@ -296,11 +303,12 @@ function showRoom() {
 
 function clearSession() {
   if (source) { source.close(); source = null; }
-  clearMedia(); closeViewer(); cancelRecording(); voiceRecorded=null; lastChatSignature=''; chatDecrypted.clear(); mediaStageKey='';
+  clearMedia(); closeViewer(); cancelRecording(); voiceRecorded=null; lastChatSignature=''; mediaStageKey='';
   session = null; current = null; sessionStorage.removeItem(storageKey);
   $('landing').hidden = false; $('roomScreen').hidden = true;
   document.body.classList.remove('in-room');
   gameWasStarted = false; newestChatId = null;
+  clearChatBubbles();
   $('chatUnread').hidden = true;
   $('chatText').value = '';
   discardVoice();
@@ -486,25 +494,40 @@ function renderChat() {
   const signature=messages.map(m=>`${m.id}:${m.file?.expires||''}`).join('|');
   $('chatKeyNotice').hidden=Boolean(session.secret);
   $('chatSend').disabled=!session.secret||current.players.length!==2;
-  $('recordVoice').disabled=!session.secret||current.players.length!==2;
+  $('recordVoice').disabled=microphonePending||!session.secret||current.players.length!==2;
   $('voiceFileLabel').hidden=!session.secret||current.players.length!==2;
   if(signature===lastChatSignature)return;
   lastChatSignature=signature;
   const list=$('chatMessages');
   const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<100;
-  list.replaceChildren();
-  if(!messages.length){const empty=document.createElement('p');empty.className='chat-empty';empty.textContent='Aún no hay mensajes. Escribid algo o mandad un audio ♡';list.append(empty);}
-  for(const m of messages){
+  const visibleIds = new Set(messages.map(message => message.id));
+  for (const [id, bubble] of chatBubbles) {
+    if (!visibleIds.has(id)) removeChatBubble(id, bubble);
+  }
+  if (!messages.length && !list.querySelector('.chat-empty')) {
+    const empty = document.createElement('p');
+    empty.className = 'chat-empty';
+    empty.textContent = 'Aún no hay mensajes. Escribid algo o mandad un audio ♡';
+    list.append(empty);
+  } else if (messages.length) {
+    list.querySelector('.chat-empty')?.remove();
+  }
+  for (const m of messages) {
+    if (chatBubbles.has(m.id)) continue;
     const mine=m.fromId===current.me;
     const item=document.createElement('div');item.className='chat-bubble '+(mine?'mine':'theirs');
+    const bubble = {item};
+    chatBubbles.set(m.id, bubble);
     const header=document.createElement('small');header.textContent=`${mine?'Tú':m.fromName} · ${new Date(m.at).toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}`;
     item.append(header);
     if(m.kind==='text'){
-      const text=document.createElement('p');text.textContent=chatDecrypted.get(m.id)||'Descifrando…';item.append(text);
-      if(!chatDecrypted.has(m.id)) decryptChatText(m,text);
+      const text=document.createElement('p');text.textContent='Descifrando…';item.append(text);
+      decryptChatText(m,text);
+    } else if (m.kind === 'voice' && m.file) {
+      addVoicePlayer(bubble, m.file);
     }else if(m.file){
       const title=document.createElement('p');
-      title.textContent=m.kind==='voice'?'🎙 Mensaje de voz':m.file.kind==='video'?'🎥 Vídeo privado':'📷 Foto privada';
+      title.textContent=m.file.kind==='video'?'🎥 Vídeo privado':'📷 Foto privada';
       item.append(title);
       if(mine){const msg=document.createElement('span');msg.className='chat-hint';msg.textContent='Enviado de forma cifrada';item.append(msg);}
       else if(Date.now()>=m.file.expires){const msg=document.createElement('span');msg.className='chat-hint';msg.textContent='Archivo caducado';item.append(msg);}
@@ -514,11 +537,82 @@ function renderChat() {
   }
   if(atBottom && activeRoomPage === 'chatPanel')list.scrollTop=list.scrollHeight;
 }
+function removeChatBubble(id, bubble) {
+  bubble.item.remove();
+  clearTimeout(bubble.expiry);
+  bubble.audio?.pause();
+  if (bubble.url) URL.revokeObjectURL(bubble.url);
+  chatBubbles.delete(id);
+}
+
+function clearChatBubbles() {
+  for (const [id, bubble] of chatBubbles) removeChatBubble(id, bubble);
+  $('chatMessages').replaceChildren();
+}
+
+function addVoicePlayer(bubble, file) {
+  const player = document.createElement('div');
+  player.className = 'chat-voice';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'chat-download';
+  button.textContent = '▶ Reproducir audio';
+  const duration = document.createElement('span');
+  duration.textContent = formatTime(file.duration);
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.hidden = true;
+  audio.setAttribute('aria-label', 'Mensaje de voz');
+  audio.addEventListener('play', () => {
+    for (const other of chatBubbles.values()) {
+      if (other.audio !== audio) other.audio?.pause();
+    }
+  });
+  bubble.audio = audio;
+  player.append(button, duration, audio);
+  bubble.item.append(player);
+
+  function expire() {
+    bubble.expired = true;
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    if (bubble.url) URL.revokeObjectURL(bubble.url);
+    bubble.url = null;
+    player.textContent = 'Audio caducado';
+  }
+
+  if (Date.now() >= file.expires) {
+    expire();
+    return;
+  }
+  bubble.expiry = setTimeout(expire, file.expires - Date.now());
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Cargando audio…';
+    try {
+      const blob = await downloadEncrypted(file);
+      if (!bubble.item.isConnected || bubble.expired) return;
+      bubble.url = URL.createObjectURL(blob);
+      audio.src = bubble.url;
+      button.hidden = true;
+      audio.hidden = false;
+      if (activeRoomPage === 'chatPanel') await audio.play().catch(() => {});
+    } catch (error) {
+      if (bubble.item.isConnected && !bubble.expired) {
+        button.disabled = false;
+        button.textContent = '↻ Reintentar audio';
+        notify(error.message);
+      }
+    }
+  });
+}
+
 async function decryptChatText(m,target) {
   try {
     const key=await aesKey();
     const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:fromBase64(m.iv)},key,fromBase64(m.data));
-    const txt=decoder.decode(plain);chatDecrypted.set(m.id,txt);
+    const txt=decoder.decode(plain);
     if(target.isConnected) target.textContent=txt;
   }catch {if(target.isConnected)target.textContent='🔒 No se pudo descifrar. Usad el mismo enlace privado.';}
 }
@@ -563,11 +657,23 @@ function cancelRecording() {
   if($('recordVoice'))$('recordVoice').textContent='🎙 Grabar audio';
 }
 async function toggleVoiceRecording() {
-  if(voiceRecording){voiceRecording.recorder.stop();return;}
+  if (voiceRecording) {
+    if (voiceRecording.recorder.state === 'recording') voiceRecording.recorder.stop();
+    return;
+  }
+  if (microphonePending) return;
   if(!session?.secret)return notify('Para enviar audios necesitas el enlace privado completo.');
   if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return notify('Tu navegador no permite grabar. Usa «Elegir audio».');
+  const recordingSession = session;
+  let stream;
+  microphonePending = true;
+  $('recordVoice').disabled = true;
   try {
-    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    if (session !== recordingSession || current?.players.length !== 2) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
     const supported=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));
     const recorder=new MediaRecorder(stream,supported?{mimeType:supported}:{});
     const chunks=[];
@@ -587,7 +693,13 @@ async function toggleVoiceRecording() {
     $('recordVoice').textContent='■ Detener audio';
     $('voiceStatus').textContent='Grabando… pulsa Detener cuando termines (máx. 2 min).';
     voiceTimer=setTimeout(()=>{if(voiceRecording?.recorder.state==='recording')voiceRecording.recorder.stop();},120000);
-  }catch(e){notify('No se pudo usar el micrófono. Revisa los permisos del navegador.');}
+  } catch {
+    stream?.getTracks().forEach(track => track.stop());
+    notify('No se pudo usar el micrófono. Revisa los permisos del navegador.');
+  } finally {
+    microphonePending = false;
+    $('recordVoice').disabled = !session?.secret || current?.players.length !== 2;
+  }
 }
 function showVoiceReady(blob,duration) {
   voiceRecorded={file:blob,duration};
@@ -605,15 +717,17 @@ async function chooseVoiceFile(e) {
   catch(err){notify(err.message);}
 }
 async function sendVoice() {
-  if(!voiceRecorded||!session)return;
-  if(!window.confirm('¿Enviar este mensaje de voz a tu pareja?'))return;
-  const {file,duration}=voiceRecorded;
+  if (!voiceRecorded || !session || sendingVoice) return;
+  const draft = voiceRecorded;
+  const {file, duration} = draft;
+  sendingVoice = true;
   $('sendVoice').disabled=true;
   try {
     await uploadEncrypted(file,'audio','chat',duration,p=>{$('voiceStatus').textContent=`Enviando audio cifrado… ${p} %`;});
-    discardVoice();$('voiceStatus').textContent='Mensaje de voz enviado ✓';
+    if (voiceRecorded === draft) discardVoice();
+    $('voiceStatus').textContent='Mensaje de voz enviado ✓';
   }catch(e){$('voiceStatus').textContent=e.message;notify(e.message);}
-  finally{$('sendVoice').disabled=false;}
+  finally{sendingVoice=false;$('sendVoice').disabled=false;}
 }
 function discardVoice(){voiceRecorded=null;$('voicePreviewBox').hidden=true;const audio=$('voicePreview');
   if(audio.src.startsWith('blob:'))URL.revokeObjectURL(audio.src);audio.removeAttribute('src');$('voiceFile').value='';}

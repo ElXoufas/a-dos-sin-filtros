@@ -148,7 +148,8 @@ function createTransferLayer({findRoomAndPlayer, allowCamera, allowTodo, broadca
   function download(req,res,url) {
     const {room,p}=findRoomAndPlayer({room:req.headers['x-ados-room'],token:req.headers['x-ados-token']});
     const f=validFile(room,url.searchParams.get('id'));
-    if (!f.complete || f.toId!==p.id) error('Archivo no disponible para tu cuenta.',403);
+    const canReplayOwnVoice = f.context === 'chat' && f.kind === 'audio' && f.fromId === p.id;
+    if (!f.complete || (f.toId !== p.id && !canReplayOwnVoice)) error('Archivo no disponible para tu cuenta.',403);
     if (f.context==='round' && (!allowCamera(room) || (room.settings.level === 'todo' && !allowTodo(room)))) error('Ya no hay consentimiento para este contenido.',403);
     const i=Number(url.searchParams.get('i'));
     if (!Number.isSafeInteger(i)||i<0||i>=f.chunkCount||!f.parts[i]) error('Fragmento no encontrado.',404);
