@@ -3,7 +3,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { cards, cameraCards } = require('./cards');
+const fallbackDecks = require('./v6-decks');
+const {
+  cards, cameraCards,
+  cameraCardsIntenso = fallbackDecks.cameraCardsIntenso,
+  todoValeCards = fallbackDecks.todoValeCards
+} = require('./cards');
+const {createTransferLayer} = require('./transfer-layer');
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -22,11 +28,11 @@ function randomCode() {
   while (ROOMS.has(s));
   return s;
 }
-function player(name, mediaConsent) {
+function player(name, mediaConsent, todoConsent) {
   return {
     id: crypto.randomUUID(), token: crypto.randomBytes(24).toString('hex'),
     name: String(name || '').trim().replace(/[\u0000-\u001f\u007f<>]/g, '').slice(0, 22),
-    mediaConsent: Boolean(mediaConsent), ready: false, points: 0, streams: new Set()
+    mediaConsent: Boolean(mediaConsent), todoConsent: Boolean(todoConsent), ready: false, points: 0, streams: new Set()
   };
 }
 function error(msg, status = 400) { const e = new Error(msg); e.status = status; throw e; }
@@ -79,16 +85,20 @@ function throttle(req) {
 function allowCamera(room) {
   return room.settings.cameraEnabled && room.players.length === 2 && room.players.every(p => p.mediaConsent);
 }
+function allowTodo(room) {
+  return allowCamera(room) && room.players.every(p => p.todoConsent);
+}
 function publicState(room, requester) {
   return {
     code: room.code, me: requester.id, host: room.players[0]?.id,
-    players: room.players.map(p => ({ id:p.id, name:p.name, ready:p.ready, mediaConsent:p.mediaConsent, online:p.streams.size > 0, points:p.points })),
-    settings: { ...room.settings, cameraActive: allowCamera(room), customCount: room.customCards.length },
+    players: room.players.map(p => ({ id:p.id, name:p.name, ready:p.ready, mediaConsent:p.mediaConsent, todoConsent:p.todoConsent, online:p.streams.size > 0, points:p.points })),
+    settings: { ...room.settings, cameraActive: allowCamera(room), todoValeActive: allowTodo(room), customCount: room.customCards.length, customPhotoCount: room.customCards.filter(c => c.kind === 'dare' && c.media === 'foto').length, customVideoCount: room.customCards.filter(c => c.kind === 'dare' && c.media === 'video').length },
     game: {
       started: room.game.started, stage: room.game.stage, turn: room.game.turn,
       card: room.game.card, round:room.game.round, timerEnd:room.game.timerEnd,
       history: room.game.history.slice(-7).reverse()
-    }
+    },
+    messages: room.messages.slice(-65)
   };
 }
 function broadcast(room) {
@@ -137,13 +147,20 @@ function act(room, p, type, value) {
     const content = typeof value.text === 'string' ? value.text.trim().replace(/[\u0000-\u001f\u007f]/g,' ').slice(0,220) : '';
     if (!kind || content.length < 8) error('Escribe al menos 8 caracteres y elige verdad o reto.');
     if (media && kind !== 'dare') error('Las cartas de cámara deben ser retos.');
-    if (room.customCards.length >= 50) error('El máximo es de 50 cartas personalizadas.');
+    if (room.customCards.length >= 100) error('El máximo es de 100 cartas personalizadas.');
     room.customCards.push({ kind, media, text:content });
     return;
   }
   if (type === 'mediaConsent') {
     p.mediaConsent = Boolean(value);
-    if (room.game.card?.media && !allowCamera(room)) {
+    if (room.game.card?.media && (room.settings.level === 'todo' ? !allowTodo(room) : !allowCamera(room))) {
+      room.game.stage = 'choose'; room.game.card = null; room.game.timerEnd = null;
+    }
+    return;
+  }
+  if (type === 'todoConsent') {
+    p.todoConsent = Boolean(value);
+    if (room.settings.level === 'todo' && !allowTodo(room)) {
       room.game.stage = 'choose'; room.game.card = null; room.game.timerEnd = null;
     }
     return;
@@ -157,8 +174,10 @@ function act(room, p, type, value) {
     requireHost(room,p);
     if (room.game.started) error('Las reglas se cambian antes de comenzar.');
     if (!value || typeof value !== 'object') error('Configuración no válida.');
-    if (['chispa','fuego','intenso'].includes(value.level)) room.settings.level = value.level;
-    if (typeof value.cameraEnabled === 'boolean') room.settings.cameraEnabled = value.cameraEnabled;
+    if (['chispa','fuego','intenso','todo'].includes(value.level)) room.settings.level = value.level;
+    if (typeof value.onlyCustomTodo === 'boolean') room.settings.onlyCustomTodo = value.onlyCustomTodo;
+    if (room.settings.level === 'todo') room.settings.cameraEnabled = true;
+    else if (typeof value.cameraEnabled === 'boolean') room.settings.cameraEnabled = value.cameraEnabled;
     room.players.forEach(x => x.ready = false);
     return;
   }
@@ -166,6 +185,8 @@ function act(room, p, type, value) {
     requireHost(room,p);
     if (room.game.started) error('La partida ya está empezada.');
     if (room.players.length !== 2 || !room.players.every(x => x.ready)) error('Deben estar las dos personas y marcar Listo.');
+    if (room.settings.level === 'todo' && !allowTodo(room)) error('TODO VALE requiere que ambos aceptéis los retos +18 y la cámara.');
+    if (room.settings.level === 'todo' && room.settings.onlyCustomTodo && !['foto','video'].every(media => room.customCards.some(c => c.kind === 'dare' && c.media === media))) error('Para usar solo vuestros retos, añadid al menos uno de foto y uno de vídeo.');
     room.game = { started:true, stage:'choose', turn:room.players[crypto.randomInt(2)].id, card:null, round:1, timerEnd:null, history:[] };
     return;
   }
@@ -180,15 +201,28 @@ function act(room, p, type, value) {
   if (room.game.turn !== p.id) error('Ahora es el turno de la otra persona.',403);
   if (type === 'pick') {
     if (room.game.stage !== 'choose') error('Termina antes la carta actual.');
+    if (room.settings.level === 'todo') {
+      if (!allowTodo(room)) error('TODO VALE necesita el consentimiento de ambos para fotos, vídeos y desnudez.', 403);
+      let media = String(value);
+      if (media === 'random') media = crypto.randomInt(2) ? 'foto' : 'video';
+      if (!['foto','video'].includes(media)) error('En TODO VALE solo existen retos de foto o vídeo.');
+      const options = room.customCards.filter(c => c.kind === 'dare' && c.media === media);
+      const custom = room.settings.onlyCustomTodo || (options.length && crypto.randomInt(100) < 35);
+      if (room.settings.onlyCustomTodo && !options.length) error('Añadid al menos un reto privado de ese tipo.');
+      const selected = custom ? deckPick(room, `custom:todo:${media}`, options) : deckPick(room, `todo:${media}`, todoValeCards[media]);
+      room.game.card = {kind:'dare',text:selected.text,media};
+      room.game.stage = 'prompt'; room.game.timerEnd = null;
+      return;
+    }
     let kind = String(value);
     if (kind === 'random') kind = crypto.randomInt(2) ? 'truth' : 'dare';
     if (!['truth','dare'].includes(kind)) error('Tipo de carta no válido.');
-    const camera = kind === 'dare' && allowCamera(room) && crypto.randomInt(4) === 0;
+    const camera = kind === 'dare' && allowCamera(room) && crypto.randomInt(room.settings.level === 'intenso' ? 2 : 4) === 0;
     const options = room.customCards.filter(c => c.kind === kind && (allowCamera(room) || !c.media) && (camera ? Boolean(c.media) : !c.media));
     const custom = options.length && crypto.randomInt(100) < 40;
     const selected = custom
       ? deckPick(room, `custom:${kind}:${camera}`, options)
-      : camera ? deckPick(room, 'camera', cameraCards)
+      : camera ? deckPick(room, room.settings.level === 'intenso' ? 'camera:intenso' : 'camera', room.settings.level === 'intenso' ? cameraCardsIntenso : cameraCards)
       : deckPick(room, `${room.settings.level}:${kind}`, cards[room.settings.level][kind]);
     room.game.card = { kind, text:selected.text || selected, media: selected.media || null };
     room.game.stage = 'prompt'; room.game.timerEnd = null;
@@ -197,7 +231,7 @@ function act(room, p, type, value) {
   if (type === 'timer') {
     if (room.game.stage !== 'prompt') error('No hay un reto activo.');
     if (room.game.timerEnd) error('El temporizador ya ha comenzado.');
-    room.game.timerEnd = Date.now() + 60_000;
+    room.game.timerEnd = Date.now() + (room.game.card?.media === 'video' ? 300_000 : 60_000);
     return;
   }
   if (type === 'finish' || type === 'skip') {
@@ -207,11 +241,13 @@ function act(room, p, type, value) {
   }
   error('Acción desconocida.');
 }
+const transferLayer = createTransferLayer({findRoomAndPlayer,allowCamera,allowTodo,broadcast,json,corsSafe,error,readBody});
 function cleanOldRooms() {
   const now = Date.now();
   for (const [code, room] of ROOMS) {
-    if (now - room.lastActivity > MAX_AGE && room.players.every(p => p.streams.size === 0)) ROOMS.delete(code);
+    if (now - room.lastActivity > MAX_AGE && room.players.every(p => p.streams.size === 0)) { transferLayer.eraseRoom(room); ROOMS.delete(code); }
   }
+  transferLayer.prune();
   for (const [ip, rec] of ACCESS_LOG) if (now - rec.start > 90_000) ACCESS_LOG.delete(ip);
 }
 setInterval(cleanOldRooms, 60_000).unref();
@@ -223,7 +259,7 @@ function serveFile(req, res, pathname) {
   const mime = ({ '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.webmanifest':'application/manifest+json' })[path.extname(full)] || 'application/octet-stream';
   fs.readFile(full, (err, data) => {
     if (err) return json(res,404,{error:'No encontrado.'});
-    corsSafe(res); res.setHeader('Cache-Control', 'public, max-age=300');
+    corsSafe(res); res.setHeader('Cache-Control', /\.(html|js|css)$/.test(full) ? 'no-cache, must-revalidate' : 'public, max-age=300');
     res.writeHead(200, { 'Content-Type':mime }); res.end(data);
   });
 }
@@ -250,12 +286,19 @@ const server = http.createServer(async (req,res) => {
       const {room,p} = findRoomAndPlayer({room:url.searchParams.get('room'),token:url.searchParams.get('token')});
       return json(res,200,{ok:true,state:publicState(room,p)});
     }
+    // Fragmentos binarios: ruta independiente del límite JSON de la versión anterior.
+    if (url.pathname === '/api/upload/chunk' && req.method === 'POST') return await transferLayer.writeChunk(req,res);
+    if (url.pathname === '/api/upload/chunk' && req.method === 'GET') return transferLayer.download(req,res,url);
     if (url.pathname.startsWith('/api/') && req.method === 'POST') {
       throttle(req);
       const body = await readBody(req, url.pathname === '/api/media' ? MAX_MEDIA_POST_BYTES : 12_000);
+      if (url.pathname === '/api/upload/start') return json(res,200,await transferLayer.start(body));
+      if (url.pathname === '/api/upload/finish') return json(res,200,transferLayer.finish(body));
+      if (url.pathname === '/api/upload/cancel') return json(res,200,transferLayer.cancel(body));
+      if (url.pathname === '/api/chat/text') return json(res,200,transferLayer.sendText(body));
       if (url.pathname === '/api/media') {
         const {room,p} = findRoomAndPlayer(body);
-        if (!allowCamera(room)) error('Los dos tenéis que aceptar el modo cámara.', 403);
+        if (!allowCamera(room) || (room.settings.level === 'todo' && !allowTodo(room))) error('Los dos tenéis que aceptar el modo cámara y TODO VALE.', 403);
         const game = room.game;
         if (!game.started || game.stage !== 'prompt' || game.turn !== p.id || !game.card?.media) error('Solo puedes enviar medios en tu reto de cámara activo.', 403);
         const item = body.item;
@@ -286,13 +329,13 @@ const server = http.createServer(async (req,res) => {
         if (typeof body.name !== 'string' || !body.name.trim()) error('Escribe un nombre.');
         if (ROOMS.size >= MAX_ROOMS) error('El servidor tiene muchas salas activas. Prueba más tarde.',503);
         const code = randomCode();
-        const p = player(body.name,body.mediaConsent);
+        const p = player(body.name,body.mediaConsent,body.todoConsent);
         if (!p.name) error('Nombre no válido.');
-        const level = ['chispa','fuego','intenso'].includes(body.level) ? body.level : 'fuego';
+        const level = ['chispa','fuego','intenso','todo'].includes(body.level) ? body.level : 'fuego';
         const room = {
-          code, players:[p], settings:{level,cameraEnabled:Boolean(body.cameraEnabled)},
+          code, players:[p], settings:{level,cameraEnabled:level === 'todo' || Boolean(body.cameraEnabled),onlyCustomTodo:false},
           game:{started:false,stage:'choose',turn:null,card:null,round:1,timerEnd:null,history:[]},
-          used:new Map(),customCards:[],lastActivity:Date.now()
+          used:new Map(),customCards:[],messages:[],lastActivity:Date.now()
         };
         ROOMS.set(code,room);
         return json(res,200,{ok:true, room:code, token:p.token, playerId:p.id, state:publicState(room,p)});
@@ -305,7 +348,7 @@ const server = http.createServer(async (req,res) => {
         if (!room) error('No encontramos esa sala. Comprueba el código.',404);
         if (room.players.length >= 2) error('Esta sala ya está completa.',409);
         if (room.game.started) error('La partida ya está comenzada.',409);
-        const p = player(body.name,body.mediaConsent);
+        const p = player(body.name,body.mediaConsent,body.todoConsent);
         if (!p.name) error('Nombre no válido.');
         room.players.push(p);broadcast(room);
         return json(res,200,{ok:true,room:code,token:p.token,playerId:p.id,state:publicState(room,p)});
@@ -317,9 +360,12 @@ const server = http.createServer(async (req,res) => {
           for (const member of room.players) for (const stream of member.streams) {
             try { stream.write('event: closed\ndata: {}\n\n'); stream.end(); } catch {}
           }
+          transferLayer.eraseRoom(room);
           ROOMS.delete(room.code);
         } else {
           for (const stream of p.streams) {try {stream.write('event: closed\ndata: {}\n\n');stream.end();}catch{}}
+          transferLayer.eraseRoom(room);
+          room.messages=[];
           room.players = room.players.filter(x => x.id !== p.id);
           room.game = {started:false,stage:'choose',turn:null,card:null,round:1,timerEnd:null,history:[]};
           room.players.forEach(x => {x.ready=false;x.points=0;});
@@ -330,6 +376,8 @@ const server = http.createServer(async (req,res) => {
       if (url.pathname === '/api/action') {
         const {room,p} = findRoomAndPlayer(body);
         act(room,p,body.type,body.value);
+        if ((body.type === 'mediaConsent' || body.type === 'todoConsent') && !body.value) transferLayer.revokeRound(room);
+        if (body.type === 'settings' && !allowCamera(room)) transferLayer.revokeRound(room);
         broadcast(room);
         return json(res,200,{ok:true,state:publicState(room,p)});
       }
@@ -343,4 +391,4 @@ const server = http.createServer(async (req,res) => {
   }
 });
 if (require.main === module) server.listen(PORT,HOST,() => console.log(`A DOS listo en http://localhost:${PORT}`));
-module.exports = { server, ROOMS, act, publicState };
+module.exports = { server, ROOMS, act, publicState, transferLayer };
