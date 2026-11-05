@@ -423,16 +423,13 @@ function renderGame() {
   const todo = current.settings.level === 'todo';
   $('gamePanel').classList.toggle('todo-mode', todo);
   document.querySelector('.game-stage').classList.toggle('todo-mode', todo);
-  $('pickTruth').querySelector('small').textContent = todo ? 'PRUEBA DE' : 'CONFIESA';
-  $('pickTruth').querySelector('strong').textContent = todo ? 'Foto' : 'Verdad';
-  $('pickTruth').querySelector('.choice-icon').textContent = todo ? '▣' : '◉';
-  $('pickDare').querySelector('small').textContent = todo ? 'PRUEBA DE' : 'ATRÉVETE';
-  $('pickDare').querySelector('strong').textContent = todo ? 'Vídeo' : 'Reto';
-  $('pickDare').querySelector('.choice-icon').textContent = todo ? '▶' : '♢';
-  $('pickRandom').textContent = todo ? 'Elegir foto o vídeo al azar' : 'Sacar una carta al azar';
+  $('pickTruth').hidden = todo;
+  $('pickDare').hidden = todo;
+  $('pickRandom').textContent = todo ? 'Sacar reto al azar' : 'Sacar una carta al azar';
+  $('pickRandom').classList.toggle('primary-btn', todo);
   $('turnOverline').textContent = mine ? 'TU TURNO' : `TURNO DE ${turn?.name.toUpperCase() || 'TU PAREJA'}`;
-  $('turnTitle').textContent = game.stage === 'choose' ? (todo ? '¿Foto o vídeo?' : '¿Verdad o reto?') : (game.card.kind === 'truth' ? 'Carta de verdad' : 'Carta de reto');
-  $('turnDescription').textContent = game.stage === 'choose' ? (mine ? (todo && !current.settings.todoValeActive ? 'Modo pausado. Ambos debéis aceptar TODO VALE y la cámara.' : 'Elige cómo quieres jugar esta ronda.') : `Esperando a que ${turn?.name || 'tu pareja'} elija una carta…`) : (mine ? 'Tu decisión. Puedes hacerlo o pasar, sin dar explicaciones.' : `${turn?.name || 'Tu pareja'} tiene la palabra. Dale su tiempo.`);
+  $('turnTitle').textContent = game.stage === 'choose' ? (todo ? 'Todo Vale' : '¿Verdad o reto?') : (game.card.kind === 'truth' ? 'Carta de verdad' : 'Carta de reto');
+  $('turnDescription').textContent = game.stage === 'choose' ? (mine ? (todo && !current.settings.todoValeActive ? 'Modo pausado. Ambos debéis aceptar TODO VALE y la cámara.' : todo ? 'La baraja decide: 80 % vídeo, 20 % foto.' : 'Elige cómo quieres jugar esta ronda.') : `Esperando a que ${turn?.name || 'tu pareja'} elija una carta…`) : (mine ? 'Tu decisión. Puedes hacerlo o pasar, sin dar explicaciones.' : `${turn?.name || 'Tu pareja'} tiene la palabra. Dale su tiempo.`);
   $('chooseButtons').hidden = game.stage !== 'choose';
   $('activeCard').hidden = game.stage !== 'prompt';
   for (const id of ['pickTruth','pickDare','pickRandom']) $(id).disabled = !mine || (todo && !current.settings.todoValeActive);
@@ -652,11 +649,19 @@ async function sendChatText(event) {
   }catch(e){notify(e.message);}
   finally{$('chatSend').disabled=false;}
 }
+function setRecordingIndicator(recording) {
+  const button = $('recordVoice');
+  const label = recording ? 'Detener audio' : 'Grabar audio';
+  button.classList.toggle('recording', recording);
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
 function cancelRecording() {
   clearTimeout(voiceTimer);
   if(voiceRecording){try{voiceRecording.recorder.onstop=null;voiceRecording.recorder.stop();}catch{}
     voiceRecording.stream.getTracks().forEach(t=>t.stop());voiceRecording=null;}
-  if($('recordVoice'))$('recordVoice').textContent='Grabar audio';
+  setRecordingIndicator(false);
+  $('voiceStatus').hidden = true;
 }
 async function toggleVoiceRecording() {
   if (voiceRecording) {
@@ -684,7 +689,8 @@ async function toggleVoiceRecording() {
     recorder.onstop=()=>{
       clearTimeout(voiceTimer);stream.getTracks().forEach(t=>t.stop());
       const started=voiceRecording?.started||Date.now();
-      voiceRecording=null;$('recordVoice').textContent='Grabar audio';
+      voiceRecording=null;setRecordingIndicator(false);
+      $('voiceStatus').hidden = true;
       const mime=(recorder.mimeType||supported||'audio/webm').split(';')[0];
       const blob=new Blob(chunks,{type:mime});
       if(blob.size===0||blob.size>maxVoiceBytes){return notify('El audio está vacío o es demasiado grande (15 MB).');}
@@ -692,7 +698,8 @@ async function toggleVoiceRecording() {
     };
     recorder.start(1000);
     voiceRecording={recorder,stream,started:Date.now()};
-    $('recordVoice').textContent='■ Detener audio';
+    setRecordingIndicator(true);
+    $('voiceStatus').hidden = false;
     $('voiceStatus').textContent='Grabando… pulsa Detener cuando termines (máx. 2 min).';
     voiceTimer=setTimeout(()=>{if(voiceRecording?.recorder.state==='recording')voiceRecording.recorder.stop();},120000);
   } catch {
@@ -709,6 +716,7 @@ function showVoiceReady(blob,duration) {
   if(audio.src.startsWith('blob:'))URL.revokeObjectURL(audio.src);
   audio.src=URL.createObjectURL(blob);
   $('voicePreviewBox').hidden=false;
+  $('voiceStatus').hidden = false;
   $('voiceStatus').textContent=`Audio preparado: ${formatTime(duration)} · ${(blob.size/MiB).toFixed(1)} MB`;
 }
 async function chooseVoiceFile(e) {
@@ -727,14 +735,16 @@ async function sendVoice() {
   try {
     await uploadEncrypted(file,'audio','chat',duration,p=>{$('voiceStatus').textContent=`Enviando audio cifrado… ${p} %`;});
     if (voiceRecorded === draft) discardVoice();
+    $('voiceStatus').hidden = false;
     $('voiceStatus').textContent='Mensaje de voz enviado ✓';
   }catch(e){$('voiceStatus').textContent=e.message;notify(e.message);}
   finally{sendingVoice=false;$('sendVoice').disabled=false;}
 }
-function discardVoice(){voiceRecorded=null;$('voicePreviewBox').hidden=true;const audio=$('voicePreview');
+function discardVoice(){$('voiceStatus').hidden=true;voiceRecorded=null;$('voicePreviewBox').hidden=true;const audio=$('voicePreview');
   if(audio.src.startsWith('blob:'))URL.revokeObjectURL(audio.src);audio.removeAttribute('src');$('voiceFile').value='';}
 $('chatForm').addEventListener('submit',sendChatText);
 $('recordVoice').addEventListener('click',toggleVoiceRecording);
+$('voiceFileLabel').addEventListener('click',()=> $('voiceFile').click());
 $('voiceFile').addEventListener('change',chooseVoiceFile);
 $('sendVoice').addEventListener('click',sendVoice);
 $('discardVoice').addEventListener('click',discardVoice);
@@ -788,8 +798,8 @@ $('initialLevels').addEventListener('change',()=>{
 });
 $('myMediaConsent').addEventListener('change',e=>{if(e.target.checked&&!session.secret){e.target.checked=false;return notify('Para fotos y vídeos necesitas el enlace privado completo.');}send('mediaConsent',e.target.checked);});
 $('gameMediaConsent').addEventListener('change',e=>{if(e.target.checked&&!session.secret){e.target.checked=false;return notify('Para fotos y vídeos necesitas el enlace privado completo.');}send('mediaConsent',e.target.checked);});
-$('pickTruth').addEventListener('click',()=>send('pick',current?.settings?.level === 'todo' ? 'foto' : 'truth'));
-$('pickDare').addEventListener('click',()=>send('pick',current?.settings?.level === 'todo' ? 'video' : 'dare'));
+$('pickTruth').addEventListener('click',()=>send('pick','truth'));
+$('pickDare').addEventListener('click',()=>send('pick','dare'));
 $('pickRandom').addEventListener('click',()=>send('pick','random'));
 $('timerStart').addEventListener('click',()=>send('timer'));
 $('doneCard').addEventListener('click',()=>send('finish'));
