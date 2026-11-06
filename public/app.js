@@ -101,6 +101,7 @@ function renderMedia() {
   if (!active) return;
   if (mine) {
     $('mediaFile').accept = game.card.media === 'foto' ? 'image/*' : 'video/*';
+    $('openCamera').textContent = game.card.media === 'foto' ? 'Abrir cámara de fotos ↗' : 'Grabar vídeo ↗';
     $('mediaSendStatus').textContent ||= session.secret ? '' : 'Necesitas la clave privada del enlace de invitación.';
     $('sendMedia').disabled = !selectedMedia || !session.secret || sendingMedia;
   } else if (!incomingMedia) {
@@ -347,6 +348,33 @@ function listen() {
   source.addEventListener('open', () => { $('connectionLabel')?.setAttribute('title','Conectado'); });
   source.onerror = () => { if (session) $('roomCode').title = 'Reconectando con el servidor…'; };
 }
+let resumeSync = null;
+let lastResumeSync = 0;
+async function syncRoomAfterResume() {
+  if (!session || document.visibilityState === 'hidden' || resumeSync) return resumeSync;
+  if (Date.now() - lastResumeSync < 700) return;
+  lastResumeSync = Date.now();
+  const activeSession = session;
+  resumeSync = (async()=>{
+    try {
+      const url=`/api/state?room=${encodeURIComponent(activeSession.room)}&token=${encodeURIComponent(activeSession.token)}`;
+      const data=await request(url,null,'GET');
+      if (session !== activeSession) return;
+      current=data.state;
+      render();
+      listen();
+      $('connectionLabel')?.setAttribute('title','Conectado');
+    } catch (error) {
+      if (session === activeSession) notify('Reconectando con la sala…');
+    } finally { resumeSync=null; }
+  })();
+  return resumeSync;
+}
+document.addEventListener('visibilitychange',()=>{
+  if (document.visibilityState === 'visible') syncRoomAfterResume();
+});
+window.addEventListener('pageshow',syncRoomAfterResume);
+window.addEventListener('focus',syncRoomAfterResume);
 async function send(type, value) {
   if (!session || busy) return false;
   busy = true;
@@ -787,6 +815,16 @@ $('readyBtn').addEventListener('click', () => send('ready',!current.players.find
 $('startBtn').addEventListener('click', () => send('start'));
 $('roomLevels').addEventListener('click',e => { const b=e.target.closest('[data-level]');if(b&&!b.disabled)send('settings',{level:b.dataset.level}); });
 $('roomCameraSetting').addEventListener('change',e=>send('settings',{cameraEnabled:e.target.checked}));
+$('openCamera').addEventListener('click',()=>{
+  const input=$('mediaFile');
+  input.setAttribute('capture','environment');
+  input.click();
+});
+$('openGallery').addEventListener('click',()=>{
+  const input=$('mediaFile');
+  input.removeAttribute('capture');
+  input.click();
+});
 $('roomOnlyCustom').addEventListener('change',e=>send('settings',{onlyCustomTodo:e.target.checked}));
 $('myTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.checked));
 $('gameTodoConsent').addEventListener('change',e=>send('todoConsent',e.target.checked));

@@ -166,6 +166,9 @@ input[type=checkbox], input[type=radio] { accent-color:var(--accent); }
 .media-panel-head { display:flex; gap:6px; }
 .media-preview { display:grid; place-items:center; margin:8px 0; border-radius:8px; overflow:hidden; background:var(--nav); }
 .media-preview img, .media-preview video { display:block; max-width:100%; max-height:55vh; }
+.media-source-actions { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:8px; margin:10px 0; }
+.media-source-actions .media-choose, .media-source-actions .media-gallery { width:100%; margin:0; }
+@media (max-width:380px) { .media-source-actions { grid-template-columns:1fr; } }
 .media-preview audio, .voice-preview-box audio { width:100%; }
 .media-send { margin-top:7px; }
 

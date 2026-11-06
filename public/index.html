@@ -161,7 +161,10 @@
             <div id="mediaSender" class="media-panel" hidden>
               <div class="media-panel-head"><span>◉</span><strong>¿Quieres compartir el momento?</strong></div>
               <p>Elige una foto o vídeo de tu móvil. Primero lo verás tú; solo llegará a tu pareja cuando confirmes el envío.</p>
-              <label class="media-choose" for="mediaFile">Elegir archivo o abrir cámara ↗</label>
+              <div class="media-source-actions">
+                <button id="openCamera" type="button" class="media-choose">Abrir cámara ↗</button>
+                <button id="openGallery" type="button" class="secondary-btn media-gallery">Elegir de galería</button>
+              </div>
               <input id="mediaFile" type="file" hidden />
               <div id="mediaLocalPreview" class="media-preview" hidden></div>
               <button id="sendMedia" type="button" class="secondary-btn media-send" disabled>Enviar cifrado a mi pareja ♡</button>
